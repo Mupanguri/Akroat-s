@@ -47,8 +47,8 @@ A powerful and user-friendly port scanning tool built in Rust, featuring both co
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/akroatis-port-scanner.git
-cd akroatis-port-scanner
+git clone https://github.com/Mupanguri/Akroat-s.git
+cd Akroat-s
 
 # Build the project
 cargo build --release
@@ -56,7 +56,7 @@ cargo build --release
 
 ### Option 2: Download Pre-built Binaries
 
-1. Go to [Releases](https://github.com/yourusername/akroatis-port-scanner/releases)
+1. Go to [Releases](https://github.com/Mupanguri/Akroat-s.git/releases)
 2. Download the appropriate binary for your operating system
 3. Extract and run the executable
 
@@ -255,7 +255,7 @@ cargo run --bin port_sniffer # CLI
 
 ## 🤝 Contributing
 
-We welcome contributions! Please follow these guidelines:
+I welcome contributions! Please follow these guidelines:
 
 ### Development Setup
 1. Fork the repository
@@ -290,8 +290,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/akroatis-port-scanner/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/akroatis-port-scanner/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Mupanguri/Akroat-s.git/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Mupanguri/Akroat-s.git/discussions)
 - **Documentation**: This README and inline code comments
 
 ---
