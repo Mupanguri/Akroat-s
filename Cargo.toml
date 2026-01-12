@@ -1,6 +1,19 @@
 [package]
 name = "port_sniffer"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+name = "port_sniffer"
 
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5.54", features = ["derive"] }
+colored = "3.0.0"
+eframe = "0.33.3"
+egui = "0.33.3"
+image = "0.25"
+indicatif = "0.18.3"
+pnet = "0.35.0"
+rand = "0.9.2"
+regex = "1.12.2"

@@ -1,12 +1,9 @@
 use std::env;
-use std::io::{self, Write};
-use std::net::{IpAddr, TcpStream};
+use std::net::IpAddr;
 use std::process;
 use std::str::FromStr;
-use std::sync::mpsc::{Sender, channel};
-use std::thread;
 
-const MAX_PORT: u16 = 65535;
+use port_sniffer::{scan_ports, ScanConfig};
 
 struct Arguments {
     ipaddr: IpAddr,
@@ -23,10 +20,7 @@ impl Arguments {
 
         let f = args[1].clone();
         if let Ok(ipaddr) = IpAddr::from_str(&f) {
-            return Ok(Arguments {
-                ipaddr,
-                threads: 4,
-            });
+            return Ok(Arguments { ipaddr, threads: 4 });
         } else {
             let flag = args[1].clone();
             if (flag.contains("-h") || flag.contains("--help")) && args.len() == 2 {
@@ -48,33 +42,11 @@ impl Arguments {
                     Ok(s) => s,
                     Err(_) => return Err("Invalid IP address, must be ipv4 or ipv6"),
                 };
-                return Ok(Arguments {
-                    ipaddr,
-                    threads,
-                });
+                return Ok(Arguments { ipaddr, threads });
             } else {
                 return Err("Invalid syntax");
             }
         }
-    }
-}
-
-fn scan(tx: Sender<u16>, start_port: u16, addr: IpAddr, num_threads: u16) {
-    let mut port = start_port + 1;
-    loop {
-        match TcpStream::connect((addr, port)) {
-            Ok(_) => {
-                print!(".");
-                io::stdout().flush().unwrap();
-                tx.send(port).unwrap();
-            }
-            Err(_) => {}
-        }
-
-        if (MAX_PORT - port) <= num_threads {
-            break;
-        }
-        port += num_threads;
     }
 }
 
@@ -90,27 +62,20 @@ fn main() {
         }
     });
 
-    let num_threads = arguments.threads;
-    let addr = arguments.ipaddr;
-    let (tx, rx) = channel();
+    let config = ScanConfig {
+        ipaddr: arguments.ipaddr,
+        threads: arguments.threads,
+        timeout: 1000,
+        delay: 0,
+        randomize: false,
+    };
 
-    for i in 0..num_threads {
-        let tx = tx.clone();
-
-        thread::spawn(move || {
-            scan(tx, i, addr, num_threads);
-        });
-    }
-
-    let mut out = vec![];
-    drop(tx);
-    for p in rx {
-        out.push(p);
-    }
-
-    println!("");
-    out.sort();
-    for v in out {
-        println!("{} is open", v);
+    let results = scan_ports(config);
+    for result in results {
+        if let Some(service) = &result.service {
+            println!("{} is open - {}", result.port, service);
+        } else {
+            println!("{} is open", result.port);
+        }
     }
 }
