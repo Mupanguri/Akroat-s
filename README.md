@@ -1,6 +1,6 @@
 # Akroatis Port Scanner
 
-A powerful and user-friendly port scanning tool built in Rust, featuring both command-line and graphical user interfaces. The scanner performs TCP connect scans to identify open ports and their associated services.
+A learning project and user-friendly port scanning tool built in Rust, featuring both command-line and graphical user interfaces. The scanner performs TCP connect scans to identify open ports and their associated services more updates coming soon.
 
 ![Akroatis Logo](Akroatis.jpg)
 
