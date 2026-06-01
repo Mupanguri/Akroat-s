@@ -1,18 +1,49 @@
-use chrono;
 use eframe::egui;
 use image::{ImageReader, GenericImageView};
 use std::fs;
+use std::io::Write;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use base64::{Engine as _, engine::general_purpose};
 use ipnetwork::IpNetwork;
 use futures::future::join_all;
+use tracing_subscriber::{EnvFilter, fmt::MakeWriter};
+
 
 use port_sniffer::{scan_ports, PortResult, ScanConfig};
 use port_sniffer::vuln::nvd::{Vulnerability, fetch_vulnerabilities};
+
+struct SharedLogWriter {
+    buffer: Arc<Mutex<Vec<String>>>,
+}
+
+struct SharedLogWriterInner {
+    buffer: Arc<Mutex<Vec<String>>>,
+}
+
+impl Write for SharedLogWriterInner {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let s = String::from_utf8_lossy(buf);
+        let trimmed = s.trim().to_string();
+        if !trimmed.is_empty() {
+            self.buffer.lock().unwrap().push(trimmed);
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'writer> MakeWriter<'writer> for SharedLogWriter {
+    type Writer = SharedLogWriterInner;
+    fn make_writer(&'writer self) -> Self::Writer {
+        SharedLogWriterInner { buffer: self.buffer.clone() }
+    }
+}
 
 fn main() -> Result<(), eframe::Error> {
     let mut options = eframe::NativeOptions::default();
@@ -27,10 +58,19 @@ fn main() -> Result<(), eframe::Error> {
             }));
         }
     }
+
     eframe::run_native(
         "Akroatis Port Scanner",
         options,
-        Box::new(|_cc| Ok(Box::new(Akroatis::default()) as Box<dyn eframe::App>)),
+        Box::new(|_cc| {
+            let log_buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let writer = SharedLogWriter { buffer: log_buffer.clone() };
+            tracing_subscriber::fmt()
+                .with_writer(writer)
+                .with_env_filter(EnvFilter::try_new("info").unwrap_or_else(|_| EnvFilter::new("info")))
+                .init();
+            Ok(Box::new(Akroatis::new(log_buffer)) as Box<dyn eframe::App>)
+        }),
     )
 }
 
@@ -52,16 +92,16 @@ struct Akroatis {
     enable_service_detection: bool,
     selected_vulnerability: Option<Vulnerability>,
     filter_vulnerabilities: bool,
+    severity_threshold: String,
     deep_inspection: bool,
+    udp_scan: bool,
     terminal_logs: Vec<String>,
-    log_receiver: mpsc::Receiver<String>,
-    log_sender: mpsc::Sender<String>,
+    log_buffer: Arc<Mutex<Vec<String>>>,
 }
 
-impl Default for Akroatis {
-    fn default() -> Self {
+impl Akroatis {
+    fn new(log_buffer: Arc<Mutex<Vec<String>>>) -> Self {
         let (v_tx, v_rx) = mpsc::channel();
-        let (l_tx, l_rx) = mpsc::channel();
         let (r_tx, r_rx) = mpsc::channel();
         Self {
             ip_input: "127.0.0.1".to_string(),
@@ -81,10 +121,11 @@ impl Default for Akroatis {
             enable_service_detection: true,
             selected_vulnerability: None,
             filter_vulnerabilities: false,
+            severity_threshold: "LOW".to_string(),
             deep_inspection: false,
+            udp_scan: false,
             terminal_logs: vec!["> Initializing Akroatis...".to_string()],
-            log_receiver: l_rx,
-            log_sender: l_tx,
+            log_buffer,
         }
     }
 }
@@ -103,11 +144,14 @@ impl eframe::App for Akroatis {
             self.vulnerability_map.insert(port, vulns);
         }
 
-        // Update Terminal Logs
-        while let Ok(log) = self.log_receiver.try_recv() {
-            self.terminal_logs.push(log);
-            if self.terminal_logs.len() > 100 {
-                self.terminal_logs.remove(0);
+        // Drain tracing log buffer into terminal display
+        {
+            let mut buffer = self.log_buffer.lock().unwrap();
+            for log in buffer.drain(..) {
+                self.terminal_logs.push(log);
+                if self.terminal_logs.len() > 100 {
+                    self.terminal_logs.remove(0);
+                }
             }
         }
 
@@ -124,6 +168,16 @@ impl eframe::App for Akroatis {
                         ui.label("Severity:");
                         ui.colored_label(get_severity_color(&vuln.severity), &vuln.severity);
                     });
+                    if vuln.has_exploit {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(egui::Color32::RED, "💀 Public exploit available");
+                            if let Some(url) = &vuln.exploit_url {
+                                if ui.link("View Exploit").clicked() {
+                                    let _ = webbrowser::open(url);
+                                }
+                            }
+                        });
+                    }
                     ui.separator();
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.label(&vuln.description);
@@ -149,12 +203,25 @@ impl eframe::App for Akroatis {
                 ui.checkbox(&mut self.randomize, "🎲 Randomize Scan");
                 ui.checkbox(&mut self.enable_service_detection, "🔍 Banner Grab");
                 ui.checkbox(&mut self.deep_inspection, "🚀 Deep Inspection");
+                ui.checkbox(&mut self.udp_scan, "📡 UDP Scan");
             });
 
             ui.group(|ui| {
                 ui.label("Intelligence Filters");
                 let vulnerable_count = self.results.iter().filter(|r| self.vulnerability_map.contains_key(&r.port)).count();
                 ui.checkbox(&mut self.filter_vulnerabilities, format!("⚠️ Vulnerabilities ({})", vulnerable_count));
+                ui.horizontal(|ui| {
+                    ui.label("Min Severity:");
+                    egui::ComboBox::from_id_salt("sev_threshold")
+                        .selected_text(&self.severity_threshold)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.severity_threshold, "NONE".to_string(), "NONE");
+                            ui.selectable_value(&mut self.severity_threshold, "LOW".to_string(), "LOW");
+                            ui.selectable_value(&mut self.severity_threshold, "MEDIUM".to_string(), "MEDIUM");
+                            ui.selectable_value(&mut self.severity_threshold, "HIGH".to_string(), "HIGH");
+                            ui.selectable_value(&mut self.severity_threshold, "CRITICAL".to_string(), "CRITICAL");
+                        });
+                });
             });
 
             ui.add_space(10.0);
@@ -163,7 +230,7 @@ impl eframe::App for Akroatis {
             }
             if ui.add_enabled(self.scanning, egui::Button::new("■ STOP").min_size(egui::vec2(240.0, 30.0))).clicked() {
                 self.cancel_signal.store(true, Ordering::SeqCst);
-                let _ = self.log_sender.send("[!] User requested stop...".to_string());
+                tracing::warn!("User requested stop");
             }
 
             ui.separator();
@@ -233,8 +300,7 @@ impl eframe::App for Akroatis {
                                     }
                                     ui.colored_label(egui::Color32::LIGHT_BLUE, svc_text);
 
-                                    if let Some(_) = &svc.version {
-                                        if ui.button("🛡 CVE").clicked() {
+                                    if svc.version.is_some() && ui.button("🛡 CVE").clicked() {
                                             let tx = self.vuln_sender.clone();
                                             let svc_clone = svc.clone();
                                             let port = result.port;
@@ -246,7 +312,6 @@ impl eframe::App for Akroatis {
                                                     }
                                                 });
                                             });
-                                        }
                                     }
                                 } else {
                                     ui.label("Unknown");
@@ -254,13 +319,17 @@ impl eframe::App for Akroatis {
                             });
 
                             if let Some(vulns) = self.vulnerability_map.get(&result.port) {
-                                for v in vulns.iter() {
+                                let threshold = &self.severity_threshold;
+                                for v in vulns.iter().filter(|v| meets_threshold(&v.severity, threshold)) {
                                     ui.horizontal(|ui| {
                                         ui.label("  ⚠");
                                         if ui.link(&v.id).clicked() {
                                             self.selected_vulnerability = Some(v.clone());
                                         }
                                         ui.colored_label(get_severity_color(&v.severity), format!(": {}", v.severity));
+                                        if v.has_exploit {
+                                            ui.colored_label(egui::Color32::RED, " [EXPLOIT AVAILABLE]");
+                                        }
                                     });
                                 }
                             }
@@ -278,7 +347,7 @@ impl eframe::App for Akroatis {
 
         // Trigger vuln lookups for NEW results
         let new_results_with_versions: Vec<_> = self.results.iter()
-            .filter(|r| r.service.as_ref().map_or(false, |s| s.version.is_some()))
+            .filter(|r| r.service.as_ref().is_some_and(|s| s.version.is_some()))
             .filter(|r| !self.vulnerability_map.contains_key(&r.port))
             .cloned()
             .collect();
@@ -315,7 +384,7 @@ impl Akroatis {
         let enable_svc = self.enable_service_detection;
         let randomize = self.randomize;
         let deep_inspection = self.deep_inspection;
-        let log_tx = self.log_sender.clone();
+        let udp_scan = self.udp_scan;
         let res_tx = self.result_sender.clone();
         let complete = self.scan_complete.clone();
         let cancel = self.cancel_signal.clone();
@@ -334,7 +403,7 @@ impl Akroatis {
         self.cancel_signal.store(false, Ordering::SeqCst);
         self.scan_complete.store(false, Ordering::SeqCst);
         self.results.clear();
-        let _ = log_tx.send(format!("[!] Session started for {}", ip_str));
+        tracing::info!("Session started for {}", ip_str);
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -349,16 +418,16 @@ impl Akroatis {
                         enable_service_detection: enable_svc,
                         syn_scan: false,
                         deep_inspection,
+                        udp_scan,
                         ports: parsed_ports,
-                        log_sender: Some(log_tx.clone()),
                         result_sender: Some(res_tx),
                         cancel_signal: Some(cancel),
                         progress: Some(progress),
                     };
                     let _ = scan_ports(config).await;
-                    let _ = log_tx.send("[+] Scan complete".to_string());
+                    tracing::info!("Scan complete");
                 } else {
-                    let _ = log_tx.send("[!] Invalid target".to_string());
+                    tracing::error!("Invalid target: {}", ip_str);
                 }
                 complete.store(true, Ordering::SeqCst);
             });
@@ -379,12 +448,13 @@ impl Akroatis {
             content.push_str(&format!("Port {}: open ({})\n", r.port, svc));
             
             if let Some(vulns) = self.vulnerability_map.get(&r.port) {
-                for v in vulns {
+                let threshold = &self.severity_threshold;
+                for v in vulns.iter().filter(|v| meets_threshold(&v.severity, threshold)) {
                     content.push_str(&format!("  [!] CVE: {} | Severity: {}\n", v.id, v.severity));
                     content.push_str(&format!("      Description: {}\n", v.description.replace('\n', " ")));
                 }
             }
-            content.push_str("\n");
+            content.push('\n');
         }
         
         fs::write(&filename, content).map_err(|e| e.to_string())?;
@@ -451,7 +521,8 @@ impl Akroatis {
             
             let mut v_str = "<td>".to_string();
             if let Some(vulns) = self.vulnerability_map.get(&r.port) {
-                for v in vulns {
+                let threshold = &self.severity_threshold;
+                for v in vulns.iter().filter(|v| meets_threshold(&v.severity, threshold)) {
                     v_str.push_str(&format!(
                         r#"<div class="cve-box"><span class="severity {}">{}</span> <strong>{}</strong><br>{}</div>"#,
                         v.severity.to_uppercase(), v.severity, v.id, v.description
@@ -494,7 +565,8 @@ impl Akroatis {
             y_pos -= 7.0;
 
             if let Some(vulns) = self.vulnerability_map.get(&r.port) {
-                for v in vulns.iter().take(2) { // Limit for space
+                let threshold = &self.severity_threshold;
+                for v in vulns.iter().filter(|v| meets_threshold(&v.severity, threshold)).take(2) {
                     if y_pos < 30.0 { break; }
                     current_layer.use_text(format!("  [!] {} ({})", v.id, v.severity), 8.0, Mm(25.0), Mm(y_pos), &font_regular);
                     y_pos -= 5.0;
@@ -516,6 +588,21 @@ impl Akroatis {
         fs::write(&filename, json).map_err(|e| e.to_string())?;
         Ok(filename)
     }
+}
+
+fn severity_score(severity: &str) -> u8 {
+    match severity.to_uppercase().as_str() {
+        "CRITICAL" => 5,
+        "HIGH" => 4,
+        "MEDIUM" => 3,
+        "LOW" => 2,
+        "NONE" => 1,
+        _ => 0,
+    }
+}
+
+fn meets_threshold(vuln_severity: &str, threshold: &str) -> bool {
+    severity_score(vuln_severity) >= severity_score(threshold)
 }
 
 fn parse_port_range_gui(s: &str) -> Vec<u16> {

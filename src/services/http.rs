@@ -118,12 +118,8 @@ fn probe_http_service(ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
 /// Extract Server header from HTTP response
 fn extract_server_header(response: &str) -> Option<String> {
     // Look for Server: header
-    if let Some(server_line) = response.lines()
-        .find(|line| line.to_lowercase().starts_with("server:")) {
-        Some(server_line["Server:".len()..].trim().to_string())
-    } else {
-        None
-    }
+    response.lines()
+        .find(|line| line.to_lowercase().starts_with("server:")).map(|server_line| server_line["Server:".len()..].trim().to_string())
 }
 
 /// Extract title from HTML response

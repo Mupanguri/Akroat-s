@@ -36,7 +36,7 @@ pub(crate) fn extract_ssh_version(banner: &str) -> Option<String> {
         // The version info is in the third part and beyond
         let version_part = parts[2..].join("-");
         // Extract just the version numbers
-        let re = Regex::new(r"[\d\.]+").ok()?;
+        let re = Regex::new(r"[\d\.]+(?:p\d+)?").ok()?;
         re.find(&version_part).map(|m| m.as_str().to_string())
     } else {
         None
@@ -64,11 +64,7 @@ pub(crate) fn extract_ssh_product(banner: &str) -> Option<String> {
         if parts.len() >= 3 {
             let product_part = parts[2..].join("-");
             // Take first word as product
-            if let Some(first_word) = product_part.split_whitespace().next() {
-                Some(first_word.to_string())
-            } else {
-                None
-            }
+            product_part.split_whitespace().next().map(|first_word| first_word.to_string())
         } else {
             None
         }

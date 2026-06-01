@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use std::process;
 use std::str::FromStr;
 use ipnetwork::IpNetwork;
+use tracing_subscriber::EnvFilter;
 
 use port_sniffer::{scan_ports, ScanConfig};
 
@@ -11,6 +12,8 @@ struct Arguments {
     threads: u16,
     enable_service_detection: bool,
     deep_inspection: bool,
+    syn_scan: bool,
+    udp_scan: bool,
     ports: Option<Vec<u16>>,
     output_json: bool,
 }
@@ -42,6 +45,8 @@ impl Arguments {
         let mut threads = 4;
         let mut enable_service_detection = true;
         let mut deep_inspection = false;
+        let mut syn_scan = false;
+        let mut udp_scan = false;
         let mut ipaddr_str = String::new();
         let mut ports: Option<Vec<u16>> = None;
         let mut output_json = false;
@@ -51,11 +56,13 @@ impl Arguments {
             match args[i].as_str() {
                 "-h" | "--help" => {
                     println!(
-                        "Usage: [-j <threads>] [--port-range <range>] [--no-service] [--deep] [--json] <ipaddr>\n\
+                        "Usage: [-j <threads>] [--port-range <range>] [--no-service] [--deep] [--syn] [--udp] [--json] <ipaddr>\n\
                         -j <threads>        Number of threads to use (default: 4)\n\
                         --port-range <r>    Port range (e.g. 22,80,443 or 1-1000)\n\
                         --no-service        Disable service detection\n\
                         --deep              Enable deep inspection for services\n\
+                        --syn               SYN (half-open) scan (requires admin/Npcap)\n\
+                        --udp               Enable UDP port scanning (DNS, SNMP, DHCP)\n\
                         --json              Output results as JSON\n\
                         <ipaddr>            Target IP address"
                     );
@@ -86,6 +93,14 @@ impl Arguments {
                     deep_inspection = true;
                     i += 1;
                 }
+                "--syn" => {
+                    syn_scan = true;
+                    i += 1;
+                }
+                "--udp" => {
+                    udp_scan = true;
+                    i += 1;
+                }
                 "--json" => {
                     output_json = true;
                     i += 1;
@@ -114,6 +129,8 @@ impl Arguments {
             threads,
             enable_service_detection,
             deep_inspection,
+            syn_scan,
+            udp_scan,
             ports,
             output_json,
         })
@@ -122,6 +139,10 @@ impl Arguments {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_new("info").unwrap_or_else(|_| EnvFilter::new("info")))
+        .init();
+
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
     let arguments = Arguments::new(&args).unwrap_or_else(|err| {
@@ -140,10 +161,10 @@ async fn main() {
         delay: 0,
         randomize: false,
         enable_service_detection: arguments.enable_service_detection,
-        syn_scan: false,
+        syn_scan: arguments.syn_scan,
         deep_inspection: arguments.deep_inspection,
         ports: arguments.ports,
-        log_sender: None,
+        udp_scan: arguments.udp_scan,
         result_sender: None,
         cancel_signal: None,
         progress: None,
