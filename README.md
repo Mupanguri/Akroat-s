@@ -87,18 +87,31 @@ cargo run --bin akroatis
 ### Command Line Interface (CLI)
 
 ```bash
-# Basic scan of first 1024 ports
+# Basic scan (ports 1-65535)
 cargo run --bin port_sniffer -- 192.168.1.1
 
 # Scan with custom thread count
 cargo run --bin port_sniffer -- -j 8 192.168.1.1
+
+# SYN half-open scan (requires admin/Npcap on Windows)
+cargo run --bin port_sniffer -- --syn 192.168.1.1
+
+# Disable banner grabbing / service detection
+cargo run --bin port_sniffer -- --no-service 192.168.1.1
+
+# Deep inspection for services
+cargo run --bin port_sniffer -- --deep 192.168.1.1
 
 # Display help
 cargo run --bin port_sniffer -- --help
 ```
 
 #### CLI Options:
-- `-j, --threads <THREADS>`: Number of scanning threads (default: 4)
+- `-j <THREADS>`: Number of scanning threads (default: 4)
+- `--no-service`: Disable service detection
+- `--syn`: Perform a SYN (half-open) scan
+- `--deep`: Enable deep inspection for services
+- `<ipaddr>`: Target IP address (required)
 - `-h, --help`: Display help information
 
 #### CLI Output Example:

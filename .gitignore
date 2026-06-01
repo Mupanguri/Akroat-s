@@ -3,3 +3,6 @@ target/
 
 # Optional: backup files
 **/*.rs.bk
+
+# Editor configs
+.kilo/
