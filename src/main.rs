@@ -5,7 +5,7 @@ use std::str::FromStr;
 use ipnetwork::IpNetwork;
 use tracing_subscriber::EnvFilter;
 
-use port_sniffer::{scan_ports, ScanConfig};
+use port_sniffer::{config::Config, scan_ports, ScanConfig};
 
 struct Arguments {
     ipaddr: IpAddr,
@@ -142,6 +142,8 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_new("info").unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
+
+    let _cfg = Config::load();
 
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();

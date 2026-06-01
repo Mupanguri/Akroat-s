@@ -2,8 +2,17 @@ use crate::services::banner_grabber::grab_banner;
 use crate::ServiceInfo;
 use regex::Regex;
 use reqwest::blocking::Client;
+use reqwest::header::HeaderMap;
 use std::sync::OnceLock;
 use std::time::Duration;
+
+/// Detected technology/app stack entry
+#[derive(Debug, Clone)]
+pub struct AppTech {
+    pub name: String,
+    pub version: Option<String>,
+    pub certainty: f32,
+}
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 
@@ -66,24 +75,16 @@ fn probe_http_service(ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
     
     // reqwest::Client handles the connection pool and Keep-Alive automatically
     let response = client.get(&url).send().ok()?;
-    
-    // Fix: Extract headers BEFORE consuming the response body
-    let server = response.headers() 
+
+    // Extract headers BEFORE consuming the response body
+    let server = response.headers()
         .get(reqwest::header::SERVER)
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
 
-    let mut extrainfo_parts = Vec::new();
+    let headers = response.headers().clone();
 
-    if deep {
-        // Common headers to inspect
-        let interesting_headers = ["X-Powered-By", "Content-Type", "X-Frame-Options", "X-Content-Type-Options"];
-        for name in interesting_headers {
-            if let Some(val) = response.headers().get(name).and_then(|h| h.to_str().ok()) { // Fix: Use response.headers() before response.text()
-                extrainfo_parts.push(format!("{}: {}", name, val));
-            }
-        }
-    }
+    let mut extrainfo_parts = Vec::new();
 
     // Now consume the response body
     let body = response.text().ok().unwrap_or_default();
@@ -92,6 +93,22 @@ fn probe_http_service(ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
     }
 
     if deep {
+        // Common headers to inspect
+        let interesting_headers = ["X-Powered-By", "Content-Type", "X-Frame-Options", "X-Content-Type-Options"];
+        for name in interesting_headers {
+            if let Some(val) = headers.get(name).and_then(|h| h.to_str().ok()) {
+                extrainfo_parts.push(format!("{}: {}", name, val));
+            }
+        }
+
+        // App stack detection
+        let cookie_str = headers.get(reqwest::header::SET_COOKIE).map(|v| v.to_str().unwrap_or("")).unwrap_or("");
+        let apps = detect_app_stack(&headers, &body, cookie_str);
+        for app in &apps {
+            let ver = app.version.as_deref().map(|v| format!(" {}", v)).unwrap_or_default();
+            extrainfo_parts.push(format!("Tech: {}{}", app.name, ver));
+        }
+
         // Fetch robots.txt
         let robots_url = format!("{}://{}:{}/robots.txt", scheme, ip, port);
         if let Ok(robots_res) = client.get(&robots_url).send() {
@@ -131,5 +148,156 @@ fn extract_html_title(response: &str) -> Option<String> {
 
     re.captures(response).and_then(|cap| {
         cap.get(1).map(|m| m.as_str().to_string())
+    })
+}
+
+/// Detect web application technology stack from HTTP response headers and body.
+pub fn detect_app_stack(headers: &HeaderMap, body: &str, _cookies: &str) -> Vec<AppTech> {
+    let mut techs = Vec::new();
+
+    // 1. Server header
+    if let Some(server) = headers.get(reqwest::header::SERVER).and_then(|v| v.to_str().ok()) {
+        let server_lower = server.to_lowercase();
+        if server_lower.contains("nginx") {
+            let ver = extract_version(server, "nginx/");
+            techs.push(AppTech { name: "Nginx".to_string(), version: ver, certainty: 1.0 });
+        } else if server_lower.contains("apache") {
+            let ver = extract_version(server, "apache/");
+            techs.push(AppTech { name: "Apache HTTPD".to_string(), version: ver, certainty: 1.0 });
+        } else if server_lower.contains("iis") {
+            let ver = extract_version(server, "/");
+            techs.push(AppTech { name: "IIS".to_string(), version: ver, certainty: 1.0 });
+        } else if server_lower.contains("cloudflare") {
+            techs.push(AppTech { name: "Cloudflare".to_string(), version: None, certainty: 1.0 });
+        } else if server_lower.contains("caddy") {
+            let ver = extract_version(server, "caddy/");
+            techs.push(AppTech { name: "Caddy".to_string(), version: ver, certainty: 1.0 });
+        } else if server_lower.contains("openresty") {
+            techs.push(AppTech { name: "OpenResty".to_string(), version: None, certainty: 1.0 });
+        }
+    }
+
+    // 2. X-Powered-By header
+    if let Some(powered) = headers.get("x-powered-by").and_then(|v| v.to_str().ok()) {
+        let p = powered.to_lowercase();
+        if p.contains("php") {
+            let ver = extract_version(powered, "php/");
+            techs.push(AppTech { name: "PHP".to_string(), version: ver, certainty: 0.9 });
+        } else if p.contains("asp.net") {
+            let ver = extract_version(powered, "asp.net");
+            techs.push(AppTech { name: "ASP.NET".to_string(), version: ver, certainty: 0.9 });
+        } else if p.contains("express") {
+            techs.push(AppTech { name: "Express".to_string(), version: None, certainty: 0.8 });
+        } else if p.contains("python") {
+            techs.push(AppTech { name: "Python".to_string(), version: None, certainty: 0.7 });
+        }
+    }
+
+    // 3. X-Generator / X-Drupal-Cache / X-Varnish
+    if let Some(gen) = headers.get("x-generator").and_then(|v| v.to_str().ok()) {
+        let g = gen.to_lowercase();
+        if g.contains("wordpress") || g.contains("wordpress") {
+            let ver = extract_version(gen, "wordpress ");
+            techs.push(AppTech { name: "WordPress".to_string(), version: ver, certainty: 0.9 });
+        } else if g.contains("drupal") {
+            techs.push(AppTech { name: "Drupal".to_string(), version: None, certainty: 0.9 });
+        }
+    }
+    if headers.get("x-drupal-cache").is_some() {
+        techs.push(AppTech { name: "Drupal".to_string(), version: None, certainty: 0.8 });
+    }
+
+    // 4. Set-Cookie patterns
+    if let Some(cookie_str) = headers.get(reqwest::header::SET_COOKIE).and_then(|v| v.to_str().ok()) {
+        let c = cookie_str.to_lowercase();
+        if c.contains("phpsessid") { techs.push(AppTech { name: "PHP".to_string(), version: None, certainty: 0.6 }); }
+        if c.contains("asp.net_sessionid") { techs.push(AppTech { name: "ASP.NET".to_string(), version: None, certainty: 0.6 }); }
+        if c.contains("jsessionid") { techs.push(AppTech { name: "Java".to_string(), version: None, certainty: 0.7 }); }
+        if c.contains("wp-") || c.contains("wordpress_logged") { techs.push(AppTech { name: "WordPress".to_string(), version: None, certainty: 0.7 }); }
+    }
+
+    // 5. HTML meta generator
+    static META_GEN_RE: OnceLock<Regex> = OnceLock::new();
+    let re = META_GEN_RE.get_or_init(|| {
+        Regex::new(r#"(?i)<meta[^>]+(?:name=["']generator["']|content=["']([^"']+)["'])[^>]*>"#).expect("Invalid meta regex")
+    });
+    if let Some(caps) = re.captures(body) {
+        if let Some(content) = caps.get(1).or_else(|| {
+            static ALT_GEN: OnceLock<Regex> = OnceLock::new();
+            let r2 = ALT_GEN.get_or_init(|| {
+                Regex::new(r#"(?i)content=["']([^"']+)["'][^>]*name=["']generator["']"#).expect("Invalid meta regex")
+            });
+            r2.captures(body).and_then(|c| c.get(1))
+        }) {
+            let content = content.as_str().to_string();
+            let lower = content.to_lowercase();
+            if lower.contains("wordpress") {
+                let ver = content.split_whitespace().find(|w| w.contains('.'));
+                techs.push(AppTech { name: "WordPress".to_string(), version: ver.map(|v| v.to_string()), certainty: 0.9 });
+            } else if lower.contains("joomla") {
+                let ver = content.split_whitespace().find(|w| w.contains('.'));
+                techs.push(AppTech { name: "Joomla".to_string(), version: ver.map(|v| v.to_string()), certainty: 0.9 });
+            } else if lower.contains("drupal") {
+                let ver = content.split_whitespace().find(|w| w.contains('.'));
+                techs.push(AppTech { name: "Drupal".to_string(), version: ver.map(|v| v.to_string()), certainty: 0.9 });
+            } else if lower.contains("shopify") {
+                techs.push(AppTech { name: "Shopify".to_string(), version: None, certainty: 0.8 });
+            } else if lower.contains("wix") {
+                techs.push(AppTech { name: "Wix".to_string(), version: None, certainty: 0.8 });
+            } else if lower.contains("squarespace") {
+                techs.push(AppTech { name: "Squarespace".to_string(), version: None, certainty: 0.8 });
+            } else {
+                techs.push(AppTech { name: content, version: None, certainty: 0.5 });
+            }
+        }
+    }
+
+    // 6. Common framework indicators in body
+    let body_lower = body.to_lowercase();
+    if (body_lower.contains("wp-content") || body_lower.contains("wp-includes"))
+        && !techs.iter().any(|t| t.name == "WordPress")
+    {
+        techs.push(AppTech { name: "WordPress".to_string(), version: None, certainty: 0.6 });
+    }
+    if body_lower.contains("joomla!")
+        && !techs.iter().any(|t| t.name == "Joomla")
+    {
+        techs.push(AppTech { name: "Joomla".to_string(), version: None, certainty: 0.6 });
+    }
+    if body_lower.contains("laravel") {
+        techs.push(AppTech { name: "Laravel".to_string(), version: None, certainty: 0.6 });
+    }
+    if body_lower.contains("symfony") {
+        techs.push(AppTech { name: "Symfony".to_string(), version: None, certainty: 0.6 });
+    }
+    if body_lower.contains("django") {
+        techs.push(AppTech { name: "Django".to_string(), version: None, certainty: 0.6 });
+    }
+
+    // 7. Response header framework hints
+    if headers.get("x-aspnet-version").is_some() {
+        techs.push(AppTech { name: "ASP.NET".to_string(), version: None, certainty: 0.8 });
+    }
+    if headers.get("x-aspnetmvc-version").is_some() {
+        techs.push(AppTech { name: "ASP.NET MVC".to_string(), version: None, certainty: 0.8 });
+    }
+    if (headers.get("x-drupal-cache").is_some() || headers.get("x-drupal-dynamic-cache").is_some())
+        && !techs.iter().any(|t| t.name == "Drupal")
+    {
+        techs.push(AppTech { name: "Drupal".to_string(), version: None, certainty: 0.8 });
+    }
+    if headers.get("x-rack-cache").is_some() {
+        techs.push(AppTech { name: "Ruby on Rails".to_string(), version: None, certainty: 0.6 });
+    }
+
+    techs
+}
+
+/// Extract a version string following a prefix
+fn extract_version(text: &str, prefix: &str) -> Option<String> {
+    text.find(prefix).and_then(|idx| {
+        let rest = &text[idx + prefix.len()..];
+        let ver: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '_' || *c == '-' || c.is_ascii_lowercase()).collect();
+        if ver.is_empty() { None } else { Some(ver) }
     })
 }

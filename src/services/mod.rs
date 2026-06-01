@@ -64,8 +64,20 @@ impl ServiceDetector for HttpDetector {
 struct SmbDetector;
 impl ServiceDetector for SmbDetector {
     fn ports(&self) -> &[u16] { &[139, 445] }
-    fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
-        detect_smb(ip, port)
+    fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
+        let mut info = detect_smb(ip, port)?;
+        if deep {
+            if let Some(shares) = smb::enumerate_smb_shares(ip, port) {
+                let share_str = shares.join(" | ");
+                let existing = info.extrainfo.take().unwrap_or_default();
+                info.extrainfo = if existing.is_empty() {
+                    Some(share_str)
+                } else {
+                    Some(format!("{} | {}", existing, share_str))
+                };
+            }
+        }
+        Some(info)
     }
 }
 

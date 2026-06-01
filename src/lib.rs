@@ -1,3 +1,4 @@
+pub mod config;
 pub mod services;
 pub mod vuln;
 pub mod utils;
@@ -13,7 +14,7 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 use tokio::net::{TcpStream, UdpSocket};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for port scanning
 #[derive(Clone)]
@@ -55,7 +56,7 @@ impl std::fmt::Display for ScanError {
 impl std::error::Error for ScanError {}
 
 /// Detailed service information
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServiceInfo {
     pub name: String,
     pub version: Option<String>,
@@ -65,7 +66,7 @@ pub struct ServiceInfo {
 }
 
 /// Result of scanning a single port
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PortResult {
     pub port: u16,
     pub is_open: bool,
@@ -314,7 +315,7 @@ async fn scan_single_port(ip: &IpAddr, port: u16, timeout_ms: u64, detect: bool,
     let timeout = Duration::from_millis(timeout_ms);
 
     match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
-        Ok(Ok(_)) => {
+        Ok(Ok(stream)) => {
             let mut service = if detect {
                 let ip_str = ip.to_string();
                 services::detect_service(&ip_str, port, deep)
@@ -344,7 +345,19 @@ async fn scan_single_port(ip: &IpAddr, port: u16, timeout_ms: u64, detect: bool,
                 }
             }
 
-            PortResult::new(port, true, service, None, None, vec![])
+            let ip_str = ip.to_string();
+            let os_fp = tokio::task::spawn_blocking(move || {
+                utils::os_fingerprint::fingerprint_os(&ip_str, port, timeout_ms)
+            }).await.ok().flatten();
+
+            let (os_guess, tcp_window, tcp_options) = if let Some(fp) = os_fp {
+                (Some(fp.guess), Some(fp.window_size), vec![format!("TTL={}", fp.ttl)])
+            } else {
+                let _ = stream.local_addr();
+                (None, None, vec![])
+            };
+
+            PortResult::new(port, true, service, os_guess, tcp_window, tcp_options)
         }
         _ => PortResult::new(port, false, None, None, None, vec![]),
     }

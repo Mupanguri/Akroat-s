@@ -1,8 +1,10 @@
 use eframe::egui;
 use image::{ImageReader, GenericImageView};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -13,7 +15,7 @@ use futures::future::join_all;
 use tracing_subscriber::{EnvFilter, fmt::MakeWriter};
 
 
-use port_sniffer::{scan_ports, PortResult, ScanConfig};
+use port_sniffer::{config::Config, scan_ports, PortResult, ScanConfig};
 use port_sniffer::vuln::nvd::{Vulnerability, fetch_vulnerabilities};
 
 struct SharedLogWriter {
@@ -59,17 +61,18 @@ fn main() -> Result<(), eframe::Error> {
         }
     }
 
+    let cfg = Config::load();
     eframe::run_native(
         "Akroatis Port Scanner",
         options,
-        Box::new(|_cc| {
+        Box::new(move |_cc| {
             let log_buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
             let writer = SharedLogWriter { buffer: log_buffer.clone() };
             tracing_subscriber::fmt()
                 .with_writer(writer)
                 .with_env_filter(EnvFilter::try_new("info").unwrap_or_else(|_| EnvFilter::new("info")))
                 .init();
-            Ok(Box::new(Akroatis::new(log_buffer)) as Box<dyn eframe::App>)
+            Ok(Box::new(Akroatis::new(log_buffer, cfg)) as Box<dyn eframe::App>)
         }),
     )
 }
@@ -99,14 +102,28 @@ struct Akroatis {
     log_buffer: Arc<Mutex<Vec<String>>>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct SessionData {
+    results: Vec<PortResult>,
+    vulnerability_map: HashMap<u16, Vec<Vulnerability>>,
+    ip_input: String,
+    port_range_input: String,
+}
+
+fn session_path() -> PathBuf {
+    let mut p = Config::path();
+    p.set_file_name("session.json");
+    p
+}
+
 impl Akroatis {
-    fn new(log_buffer: Arc<Mutex<Vec<String>>>) -> Self {
+    fn new(log_buffer: Arc<Mutex<Vec<String>>>, cfg: Config) -> Self {
         let (v_tx, v_rx) = mpsc::channel();
         let (r_tx, r_rx) = mpsc::channel();
-        Self {
+        let mut app = Self {
             ip_input: "127.0.0.1".to_string(),
-            port_range_input: String::new(),
-            randomize: false,
+            port_range_input: cfg.port_range.unwrap_or_default(),
+            randomize: cfg.randomize,
             results: Vec::new(),
             scanning: false,
             scan_complete: Arc::new(AtomicBool::new(false)),
@@ -118,15 +135,17 @@ impl Akroatis {
             vuln_receiver: v_rx,
             vuln_sender: v_tx,
             vulnerability_map: HashMap::new(),
-            enable_service_detection: true,
+            enable_service_detection: cfg.enable_service_detection,
             selected_vulnerability: None,
             filter_vulnerabilities: false,
-            severity_threshold: "LOW".to_string(),
-            deep_inspection: false,
-            udp_scan: false,
+            severity_threshold: cfg.severity_threshold,
+            deep_inspection: cfg.deep_inspection,
+            udp_scan: cfg.udp_scan,
             terminal_logs: vec!["> Initializing Akroatis...".to_string()],
             log_buffer,
-        }
+        };
+        app.load_session();
+        app
     }
 }
 
@@ -587,6 +606,43 @@ impl Akroatis {
         let json = serde_json::to_string_pretty(&self.results).map_err(|e| e.to_string())?;
         fs::write(&filename, json).map_err(|e| e.to_string())?;
         Ok(filename)
+    }
+
+    fn save_session(&self) {
+        let data = SessionData {
+            results: self.results.clone(),
+            vulnerability_map: self.vulnerability_map.clone(),
+            ip_input: self.ip_input.clone(),
+            port_range_input: self.port_range_input.clone(),
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&data) {
+            let path = session_path();
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(&path, json);
+        }
+    }
+
+    fn load_session(&mut self) {
+        let path = session_path();
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(data) = serde_json::from_str::<SessionData>(&content) {
+                    self.results = data.results;
+                    self.vulnerability_map = data.vulnerability_map;
+                    self.ip_input = data.ip_input;
+                    self.port_range_input = data.port_range_input;
+                    tracing::info!("Session restored from {}", path.display());
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Akroatis {
+    fn drop(&mut self) {
+        self.save_session();
     }
 }
 
