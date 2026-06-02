@@ -1,18 +1,12 @@
 use crate::services::banner_grabber::grab_banner_with_retries;
 
 /// Detect FTP service and extract version information
-pub fn detect_ftp(ip: &str, port: u16) -> Option<crate::ServiceInfo> {
-    // FTP typically sends a banner immediately upon connection
-    if let Some(banner) = grab_banner_with_retries(ip, port, 3000, 1) {
-        // FTP banner usually contains FTP and version info
+pub async fn detect_ftp(ip: &str, port: u16) -> Option<crate::ServiceInfo> {
+    if let Some(banner) = grab_banner_with_retries(ip, port, 3000, 1).await {
         if banner.to_lowercase().contains("ftp") {
-            // Extract version from FTP banner
             let version = extract_ftp_version(&banner);
-            
-            // Determine product from banner
             let product = extract_ftp_product(&banner);
-            
-            return Some(crate::services::ServiceInfo {
+            return Some(crate::ServiceInfo {
                 name: "FTP".to_string(),
                 version,
                 product,
@@ -21,14 +15,11 @@ pub fn detect_ftp(ip: &str, port: u16) -> Option<crate::ServiceInfo> {
             });
         }
     }
-    
     None
 }
 
-/// Extract version from FTP banner
 pub(crate) fn extract_ftp_version(banner: &str) -> Option<String> {
-    use regex::Regex; // Fix: Move import inside function
-    // Common FTP version patterns
+    use regex::Regex;
     let patterns = [
         Regex::new(r"(\d+\.\d+\.\d+)").ok()?,
         Regex::new(r"(\d+\.\d+)").ok()?,
@@ -36,7 +27,6 @@ pub(crate) fn extract_ftp_version(banner: &str) -> Option<String> {
         regex::Regex::new(r"version[:\s]+(\d+\.\d+\.\d+)").ok()?,
         regex::Regex::new(r"\bv(\d+\.\d+\.\d+)\b").ok()?,
     ];
-    
     for pattern in patterns {
         if let Some(cap) = pattern.captures(banner) {
             if let Some(m) = cap.get(1) {
@@ -44,15 +34,11 @@ pub(crate) fn extract_ftp_version(banner: &str) -> Option<String> {
             }
         }
     }
-    
     None
 }
 
-/// Extract product from FTP banner
 pub(crate) fn extract_ftp_product(banner: &str) -> Option<String> {
-    // Common FTP implementations
     let banner_lower = banner.to_lowercase();
-    
     if banner_lower.contains("microsoft") || banner_lower.contains("msftp") {
         Some("Microsoft FTP Service".to_string())
     } else if banner_lower.contains("vsftpd") {
@@ -68,17 +54,11 @@ pub(crate) fn extract_ftp_product(banner: &str) -> Option<String> {
     } else if banner_lower.contains("serv-u") {
         Some("Serv-U FTP Server".to_string())
     } else if banner_lower.contains("ftp") {
-        // Generic FTP - try to extract first word that looks like a product
         let words: Vec<&str> = banner.split_whitespace().collect();
-        if let Some(first) = words.first() {
-            if first.to_lowercase().contains("ftp") && first.len() > 3 {
-                Some(first.to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+        words
+            .first()
+            .filter(|w| w.to_lowercase().contains("ftp") && w.len() > 3)
+            .map(|w| w.to_string())
     } else {
         None
     }

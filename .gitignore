@@ -1,8 +1,21 @@
-# Ignore Rust build output
+# Rust build output
 target/
 
-# Optional: backup files
+# Backup files
 **/*.rs.bk
 
 # Editor configs
 .kilo/
+.antigravitycli/
+
+# Runtime data
+session.json
+scan_report_*.txt
+scan_report_*.html
+scan_report_*.pdf
+scan_report_*.json
+
+# SQLite database
+exploit.db
+exploit.db-wal
+exploit.db-shm

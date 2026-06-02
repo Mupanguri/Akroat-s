@@ -1,66 +1,33 @@
-use std::collections::HashMap;
-use std::fs;
-use chrono::{Utc, Duration};
-use serde::{Serialize, Deserialize};
+use crate::vuln::db::VulnDb;
+use crate::vuln::error::VulnError;
 use crate::vuln::nvd::Vulnerability;
 
-const CACHE_FILE: &str = "akroatis_cve_cache.json";
-const CACHE_EXPIRY_DAYS: i64 = 7;
+use std::sync::Mutex;
+static GLOBAL_DB: Mutex<Option<VulnDb>> = Mutex::new(None);
 
-#[derive(Serialize, Deserialize, Clone)]
-struct CacheEntry {
-    timestamp: i64,
-    vulnerabilities: Vec<Vulnerability>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct CveCache {
-    entries: HashMap<String, CacheEntry>,
-}
-
-fn get_cache_key(product: &str, version: &str) -> String {
-    format!("{}:{}", product.to_lowercase(), version.to_lowercase())
-}
-
-fn load_cache() -> CveCache {
-    if let Ok(content) = fs::read_to_string(CACHE_FILE) {
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        CveCache::default()
+/// Initialize the global cache with a VulnDb
+pub fn init_cache(db: VulnDb) {
+    if let Ok(mut g) = GLOBAL_DB.lock() {
+        *g = Some(db);
     }
 }
 
-fn save_cache(cache: &CveCache) -> Result<(), String> {
-    let content = serde_json::to_string_pretty(cache).map_err(|e| e.to_string())?;
-    fs::write(CACHE_FILE, content).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Retrieve vulnerabilities from cache if they exist and are not expired
+/// Retrieve vulnerabilities from SQLite cache
 pub fn get_cached_vulns(product: &str, version: &str) -> Option<Vec<Vulnerability>> {
-    let cache = load_cache();
-    let key = get_cache_key(product, version);
-
-    if let Some(entry) = cache.entries.get(&key) {
-        let now = Utc::now().timestamp();
-        let expiry = Duration::days(CACHE_EXPIRY_DAYS).num_seconds();
-        
-        if now - entry.timestamp < expiry {
-            return Some(entry.vulnerabilities.clone());
-        }
-    }
-    None
+    let key = format!("{}:{}", product.to_lowercase(), version.to_lowercase());
+    let db = GLOBAL_DB.lock().ok()?;
+    let db = db.as_ref()?;
+    let cached = db.cache_get(&key)?;
+    serde_json::from_str(&cached).ok()
 }
 
-/// Update the cache with fresh results
-pub fn update_cache(product: &str, version: &str, vulnerabilities: Vec<Vulnerability>) -> Result<(), String> {
-    let mut cache = load_cache();
-    let key = get_cache_key(product, version);
-    
-    cache.entries.insert(key, CacheEntry {
-        timestamp: Utc::now().timestamp(),
-        vulnerabilities,
-    });
-    
-    save_cache(&cache)
+/// Update the SQLite cache with fresh results
+pub fn update_cache(product: &str, version: &str, vulnerabilities: Vec<Vulnerability>) -> Result<(), VulnError> {
+    let key = format!("{}:{}", product.to_lowercase(), version.to_lowercase());
+    let db = GLOBAL_DB.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+    if let Some(ref db) = *db {
+        let json = serde_json::to_string(&vulnerabilities)?;
+        db.cache_set(&key, &json)?;
+    }
+    Ok(())
 }

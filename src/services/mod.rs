@@ -9,7 +9,6 @@ pub mod tls;
 #[cfg(test)]
 mod tests;
 
-use std::sync::OnceLock;
 use crate::ServiceInfo;
 use crate::services::{
     banner_grabber::grab_banner,
@@ -19,6 +18,7 @@ use crate::services::{
     smb::detect_smb,
     generic::detect_generic_service,
 };
+use async_trait::async_trait;
 
 struct Probe {
     name: &'static str,
@@ -32,42 +32,47 @@ const PROBES: &[Probe] = &[
     Probe { name: "MySQL", pattern: r"(?i)mysql" },
 ];
 
+#[async_trait]
 trait ServiceDetector: Send + Sync {
     fn ports(&self) -> &[u16];
-    fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo>;
+    async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo>;
 }
 
 struct FtpDetector;
+#[async_trait]
 impl ServiceDetector for FtpDetector {
     fn ports(&self) -> &[u16] { &[20, 21] }
-    fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
-        detect_ftp(ip, port)
+    async fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
+        detect_ftp(ip, port).await
     }
 }
 
 struct SshDetector;
+#[async_trait]
 impl ServiceDetector for SshDetector {
     fn ports(&self) -> &[u16] { &[22] }
-    fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
-        detect_ssh(ip, port)
+    async fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
+        detect_ssh(ip, port).await
     }
 }
 
 struct HttpDetector;
+#[async_trait]
 impl ServiceDetector for HttpDetector {
     fn ports(&self) -> &[u16] { &[80, 443, 8080, 8443] }
-    fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
-        detect_http(ip, port, deep)
+    async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
+        detect_http(ip, port, deep).await
     }
 }
 
 struct SmbDetector;
+#[async_trait]
 impl ServiceDetector for SmbDetector {
     fn ports(&self) -> &[u16] { &[139, 445] }
-    fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
-        let mut info = detect_smb(ip, port)?;
+    async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
+        let mut info = detect_smb(ip, port).await?;
         if deep {
-            if let Some(shares) = smb::enumerate_smb_shares(ip, port) {
+            if let Some(shares) = smb::enumerate_smb_shares(ip, port).await {
                 let share_str = shares.join(" | ");
                 let existing = info.extrainfo.take().unwrap_or_default();
                 info.extrainfo = if existing.is_empty() {
@@ -85,15 +90,17 @@ struct HintedDetector {
     ports: &'static [u16],
     hint: &'static str,
 }
+#[async_trait]
 impl ServiceDetector for HintedDetector {
     fn ports(&self) -> &[u16] { self.ports }
-    fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
-        detect_generic_service(ip, port, self.hint, deep)
+    async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
+        detect_generic_service(ip, port, self.hint, deep).await
     }
 }
 
 fn registry() -> &'static [Box<dyn ServiceDetector>] {
-    static REGISTRY: OnceLock<Vec<Box<dyn ServiceDetector>>> = OnceLock::new();
+    static REGISTRY: std::sync::OnceLock<Vec<Box<dyn ServiceDetector>>> =
+        std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
         vec![
             Box::new(FtpDetector) as Box<dyn ServiceDetector>,
@@ -121,9 +128,9 @@ fn get_detector(port: u16) -> Option<&'static dyn ServiceDetector> {
 }
 
 /// Detect service running on a specific port
-pub fn detect_service(ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
+pub async fn detect_service(ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
     // 1. Try Probe Engine (Regex-based)
-    if let Some(banner) = grab_banner(ip, port, 2000) {
+    if let Some(banner) = grab_banner(ip, port, 2000).await {
         for probe in PROBES {
             if let Ok(re) = regex::Regex::new(probe.pattern) {
                 if re.is_match(&banner) {
@@ -141,11 +148,11 @@ pub fn detect_service(ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
 
     // 2. Try trait-based dispatch
     if let Some(detector) = get_detector(port) {
-        if let Some(info) = detector.detect(ip, port, deep) {
+        if let Some(info) = detector.detect(ip, port, deep).await {
             return Some(info);
         }
     }
-    
-    // 3. Fallback to generic banner grabbing and service detection
-    detect_generic_service(ip, port, "", deep)
+
+    // 3. Fallback to generic banner grabbing
+    detect_generic_service(ip, port, "", deep).await
 }

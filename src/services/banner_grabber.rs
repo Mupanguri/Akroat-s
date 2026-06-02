@@ -1,52 +1,46 @@
-use std::io::Read; // Fix: Remove unused Write import
-use std::net::TcpStream;
-use std::time::Duration;
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
+use tokio::time::{sleep, Duration};
 
 /// Grab a banner from a TCP service
-///
-/// # Arguments
-/// * `addr` - The IP address to connect to
-/// * `port` - The port to connect to
-/// * `timeout` - Timeout in milliseconds
-///
-/// # Returns
-/// * `Option<String>` - The banner if successful, None otherwise
-pub fn grab_banner(addr: &str, port: u16, timeout: u64) -> Option<String> {
+pub async fn grab_banner(addr: &str, port: u16, timeout_ms: u64) -> Option<String> {
     let socket_addr = format!("{}:{}", addr, port);
-    match TcpStream::connect_timeout(&socket_addr.parse().ok()?, Duration::from_millis(timeout)) {
-        Ok(mut stream) => {
-            // Set read timeout
-            stream.set_read_timeout(Some(Duration::from_millis(timeout))).ok()?;
-            
-            // Try to read up to 1024 bytes
+    let timeout = Duration::from_millis(timeout_ms);
+
+    match tokio::time::timeout(timeout, TcpStream::connect(&socket_addr)).await {
+        Ok(Ok(mut stream)) => {
             let mut buffer = [0; 1024];
-            match stream.read(&mut buffer) {
-                Ok(size) if size > 0 => {
-                    // Convert to string, replacing invalid UTF-8
+            match tokio::time::timeout(timeout, stream.read(&mut buffer)).await {
+                Ok(Ok(size)) if size > 0 => {
                     let banner = String::from_utf8_lossy(&buffer[..size]);
                     Some(banner.trim().to_string())
                 }
                 _ => None,
             }
         }
-        Err(_) => None,
+        _ => None,
     }
 }
 
-/// Try to grab a banner with multiple attempts
-/// Uses an exponential backoff strategy to handle jittery network environments.
-pub fn grab_banner_with_retries(addr: &str, port: u16, timeout: u64, retries: u8) -> Option<String> {
+/// Grab a banner with retries and exponential backoff
+pub async fn grab_banner_with_retries(
+    addr: &str,
+    port: u16,
+    timeout_ms: u64,
+    retries: u8,
+) -> Option<String> {
     let mut backoff = Duration::from_millis(100);
     for i in 0..retries {
-        if let Some(banner) = grab_banner(addr, port, timeout) {
+        if let Some(banner) = grab_banner(addr, port, timeout_ms).await {
             if !banner.is_empty() {
                 return Some(banner);
             }
         }
         if i < retries - 1 {
-            std::thread::sleep(backoff);
-            // Exponentially increase the backoff, capped at the connection timeout
-            backoff = backoff.saturating_mul(2).min(Duration::from_millis(timeout));
+            sleep(backoff).await;
+            backoff = backoff
+                .saturating_mul(2)
+                .min(Duration::from_millis(timeout_ms));
         }
     }
     None

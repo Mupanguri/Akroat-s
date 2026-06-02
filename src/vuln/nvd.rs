@@ -3,7 +3,9 @@ use reqwest::Url;
 use serde_json::Value;
 use serde::{Serialize, Deserialize};
 use crate::ServiceInfo;
-use crate::vuln::{cache, exploit::check_exploit};
+use crate::vuln::exploit;
+use crate::vuln::engine::Severity;
+use crate::vuln::cache;
 
 /// Basic structure to hold vulnerability info
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,31 +27,18 @@ fn lookup_cpe(service: &ServiceInfo) -> Option<CpeEntry> {
     let name = service.name.to_lowercase();
     let product = service.product.as_deref().unwrap_or("").to_lowercase();
 
-    // Ordered by specificity (product match preferred over service name)
     match (name.as_str(), product.as_str()) {
-        // OpenSSH
         (_, "openssh") | (_, "openbsd") => Some(CpeEntry { vendor: "openbsd", product_cpe: "openssh" }),
-        // Dropbear SSH
         (_, "dropbear") => Some(CpeEntry { vendor: "dropbear_ssh", product_cpe: "dropbear_ssh" }),
-        // vsftpd
         (_, "vsftpd") => Some(CpeEntry { vendor: "vsftpd", product_cpe: "vsftpd" }),
-        // ProFTPD
         (_, "proftpd") => Some(CpeEntry { vendor: "proftpd", product_cpe: "proftpd" }),
-        // Pure-FTPd
         (_, "pure-ftpd") => Some(CpeEntry { vendor: "pureftpd", product_cpe: "pure-ftpd" }),
-        // Microsoft FTP
         (_, "microsoft ftp service") => Some(CpeEntry { vendor: "microsoft", product_cpe: "ftp" }),
-        // Apache httpd
         (_, "apache") | (_, "apache httpd") | (_, "apache_httpd") => Some(CpeEntry { vendor: "apache", product_cpe: "http_server" }),
-        // Nginx
         (_, "nginx") => Some(CpeEntry { vendor: "nginx", product_cpe: "nginx" }),
-        // IIS
         (_, "microsoft-iis") | (_, "iis") | (_, "microsoft iis") => Some(CpeEntry { vendor: "microsoft", product_cpe: "iis" }),
-        // Samba
         (_, "samba") => Some(CpeEntry { vendor: "samba", product_cpe: "samba" }),
-        // Microsoft Windows SMB
         (_, "microsoft windows smb") => Some(CpeEntry { vendor: "microsoft", product_cpe: "windows" }),
-        // By service name
         ("ssh", _) => Some(CpeEntry { vendor: "openbsd", product_cpe: "openssh" }),
         ("ftp", _) => Some(CpeEntry { vendor: "vsftpd", product_cpe: "vsftpd" }),
         ("http", _) => Some(CpeEntry { vendor: "apache", product_cpe: "http_server" }),
@@ -62,7 +51,6 @@ fn lookup_cpe(service: &ServiceInfo) -> Option<CpeEntry> {
     }
 }
 
-/// Build a CPE 2.3 URI string for the given service and version
 fn build_cpe_uri(cpe: &CpeEntry, version: &str) -> String {
     format!(
         "cpe:2.3:a:{}:{}:{}:*:*:*:*:*:*:*",
@@ -75,19 +63,22 @@ async fn query_nvd_cpe(cpe_uri: &str) -> Result<Vec<Vulnerability>, String> {
     let url = Url::parse_with_params(
         "https://services.nvd.nist.gov/rest/json/cves/2.0",
         &[("cpeName", cpe_uri)],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     let response = reqwest::get(url).await.map_err(|e| e.to_string())?;
     parse_nvd_response(response).await
 }
 
 /// Query NVD API using keyword search (fallback)
+#[allow(dead_code)]
 async fn query_nvd_keyword(product: &str, version: &str) -> Result<Vec<Vulnerability>, String> {
     let keyword = format!("{} {}", product, version);
     let url = Url::parse_with_params(
         "https://services.nvd.nist.gov/rest/json/cves/2.0",
         &[("keywordSearch", &keyword)],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     let response = reqwest::get(url).await.map_err(|e| e.to_string())?;
     parse_nvd_response(response).await
@@ -100,13 +91,21 @@ async fn parse_nvd_response(response: reqwest::Response) -> Result<Vec<Vulnerabi
     let mut vulnerabilities = Vec::new();
     if let Some(vulnerabilities_list) = json["vulnerabilities"].as_array() {
         for vuln in vulnerabilities_list.iter().take(5) {
-            let cve_id = vuln["cve"]["id"].as_str().unwrap_or("Unknown").to_string();
-            let desc = vuln["cve"]["descriptions"][0]["value"].as_str().unwrap_or("No description").to_string();
-            let severity = vuln["cve"]["metrics"]["cvssMetricV31"][0]["cvssData"]["baseSeverity"]
-                .as_str().unwrap_or("N/A").to_string();
+            let cve_id = vuln["cve"]["id"]
+                .as_str()
+                .unwrap_or("Unknown")
+                .to_string();
+            let desc = vuln["cve"]["descriptions"][0]["value"]
+                .as_str()
+                .unwrap_or("No description")
+                .to_string();
+            let severity = vuln["cve"]["metrics"]["cvssMetricV31"][0]["cvssData"]
+                ["baseSeverity"]
+                .as_str()
+                .unwrap_or("N/A")
+                .to_string();
 
-            // Check for known exploits via CIRCL API
-            let (has_exploit, exploit_url) = match check_exploit(&cve_id).await {
+            let (has_exploit, exploit_url) = match exploit::check_exploit(&cve_id).await {
                 Ok(exploits) if !exploits.is_empty() => {
                     (true, Some(exploits[0].url.clone()))
                 }
@@ -126,7 +125,22 @@ async fn parse_nvd_response(response: reqwest::Response) -> Result<Vec<Vulnerabi
     Ok(vulnerabilities)
 }
 
-/// Query NVD for vulnerabilities based on ServiceInfo
+/// Convert engine Arc<VulnRecord> to Vulnerability
+fn vuln_record_to_vuln(record: &crate::vuln::engine::VulnRecord) -> Vulnerability {
+    Vulnerability {
+        id: record.id.clone(),
+        description: record.description.clone(),
+        severity: format!("{:?}", record.severity),
+        has_exploit: !record.exploits.is_empty(),
+        exploit_url: record
+            .exploits
+            .first()
+            .filter(|e| e.verified)
+            .map(|e| e.url.clone()),
+    }
+}
+
+/// Query vulnerabilities — engine first (instant), then NVD API (background)
 pub async fn fetch_vulnerabilities(service: &ServiceInfo) -> Result<Vec<Vulnerability>, String> {
     let product = service.product.as_deref().unwrap_or(&service.name);
     let version = service.version.as_deref().unwrap_or("");
@@ -135,24 +149,43 @@ pub async fn fetch_vulnerabilities(service: &ServiceInfo) -> Result<Vec<Vulnerab
         return Err("No version info available for CVE lookup".to_string());
     }
 
-    // Check local cache first
+    // 1. Check local cache first
     if let Some(cached) = cache::get_cached_vulns(product, version) {
         return Ok(cached);
     }
 
+    // 2. Try engine match_service for instant results
+    if let Some(engine) = exploit::get_engine() {
+        let sev = Severity::None;
+        let results = engine.match_service(product, version, &sev);
+        if !results.is_empty() {
+            let vulns: Vec<Vulnerability> = results
+                .iter()
+                .map(|r| vuln_record_to_vuln(r.as_ref()))
+                .collect();
+            if !vulns.is_empty() {
+                let _ = cache::update_cache(product, version, vulns.clone());
+                return Ok(vulns);
+            }
+        }
+    }
+
+    // 3. Fallback: NVD API
     let vulnerabilities = if let Some(cpe_entry) = lookup_cpe(service) {
         let cpe_uri = build_cpe_uri(&cpe_entry, version);
         let cpe_results = query_nvd_cpe(&cpe_uri).await;
         match cpe_results {
             Ok(results) if !results.is_empty() => results,
-            _ => query_nvd_keyword(product, version).await.unwrap_or_default(),
+            _ => query_nvd_keyword(product, version)
+                .await
+                .unwrap_or_default(),
         }
     } else {
-        query_nvd_keyword(product, version).await.unwrap_or_default()
+        query_nvd_keyword(product, version)
+            .await
+            .unwrap_or_default()
     };
 
-    // Update cache with fresh results
     let _ = cache::update_cache(product, version, vulnerabilities.clone());
-
     Ok(vulnerabilities)
 }

@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  akroatis:
+    build: .
+    image: akroatis:latest
+    container_name: akroatis
+    # Host networking is required for port scanning (raw socket access, bind)
+    network_mode: host
+    environment:
+      - AKROATIS_DATA=/var/lib/akroatis
+    volumes:
+      # Persist the exploit database and NVD cache across runs
+      - akroatis_data:/var/lib/akroatis
+    # Override entrypoint to run interactively
+    stdin_open: true
+    tty: true
+    command: ["--help"]
+
+volumes:
+  akroatis_data:
