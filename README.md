@@ -34,7 +34,7 @@ Target: 192.168.1.0/24
 
 ---
 
-## 🧠 Why? — Motivation
+## Why? — Motivation
 
 Every penetration tester knows the workflow: run `nmap -sV`, grep the output, copy-paste service strings into a browser, and manually cross-reference CVEs. This is brittle, slow, and prone to oversight.
 
@@ -49,7 +49,7 @@ This project started as a simple TCP connect scanner and evolved into a self-con
 
 ---
 
-## 🎯 What? — Core Objective
+## What? — Core Objective
 
 **Build an reliale, self-contained vulnerability intelligence engine that:**
 
@@ -61,7 +61,7 @@ This project started as a simple TCP connect scanner and evolved into a self-con
 
 ---
 
-## ⚙️ How? — Architecture
+## How? — Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -110,7 +110,7 @@ NVD API 2.0    ──→ SQLite cve_index table  ──→ VulnEngine (CPE index
 
 ---
 
-## 📡 Where? — Deployment
+## Where? — Deployment
 
 ### CLI (Linux, macOS, Windows, Docker)
 
@@ -134,7 +134,7 @@ The CLI binary is designed to run inside GitLab CI pipelines (see [CI/CD Pipelin
 
 ---
 
-## ✅ Benefits & Advantages
+## Benefits & Advantages
 
 - **Fully hosted on users machine runtime** — after `update-db --download`, all lookups hit local memory
 - **Combined exploit + CVE search** — one query returns both
@@ -149,7 +149,7 @@ The CLI binary is designed to run inside GitLab CI pipelines (see [CI/CD Pipelin
 
 ---
 
-## 📚 Skill Gaps & Learning Journey
+## Skill Gaps & Learning Journey
 
 This project was built as a learning vehicle. Here is an honest accounting of where I pushed my comfort zone and where gaps remain:
 
@@ -184,7 +184,7 @@ This project was built as a learning vehicle. Here is an honest accounting of wh
 
 ---
 
-## 🚧 Problems Faced & Solutions
+## Problems Faced & Solutions
 
 | Problem | Solution |
 |---------|----------|
@@ -201,7 +201,7 @@ This project was built as a learning vehicle. Here is an honest accounting of wh
 
 ---
 
-## ⚠️ Disadvantages & Limitations
+## Disadvantages & Limitations
 
 - **No SYN scan** — uses TCP connect scans only (slower, more detectable, requires no raw sockets)
 - **CVE data requires explicit download** — not bundled; must run `update-db --download-cves`
@@ -214,7 +214,7 @@ This project was built as a learning vehicle. Here is an honest accounting of wh
 
 ---
 
-## 🔭 Future Prospects
+## Future Prospects
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
@@ -229,7 +229,7 @@ This project was built as a learning vehicle. Here is an honest accounting of wh
 
 ---
 
-## 🔄 CI/CD Pipeline (GitLab)
+## CI/CD Pipeline (GitLab)
 
 Below is a complete `.gitlab-ci.yml` configuration. It runs linting, compilation, tests, Docker build, and publishes the image to the GitLab Container Registry.
 
@@ -365,7 +365,7 @@ smoke-test:
 
 ---
 
-## 📏 Quality Standards
+## Quality Standards
 
 | Criterion | How It's Met |
 |-----------|--------------|
