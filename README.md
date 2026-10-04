@@ -65,29 +65,29 @@ This project started as a simple TCP connect scanner and evolved into a self-con
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                         CLI / GUI                             │
+│                         CLI / GUI                            │
 ├──────────────────────────────────────────────────────────────┤
-│  ┌─────────┐   ┌──────────┐   ┌────────────┐                │
-│  │ Scanner │──▶│ Service  │──▶│  Vuln      │                │
-│  │ (TCP+UDP)│  │Detection │   │  Engine    │                │
-│  └─────────┘   └──────────┘   └─────┬──────┘                │
-│       │                                │                      │
-│       ▼                                ▼                      │
+│  ┌─────────┐   ┌──────────┐   ┌────────────┐                 │
+│  │ Scanner │──▶│ Service │──▶│  Vuln      │                 │
+│  │ (TCP+UDP)│  │Detection │   │  Engine    │                 │
+│  └─────────┘   └──────────┘   └─────┬──────┘                 │
+│       │                                │                     │
+│       ▼                                ▼                     │
 │  ┌─────────┐                   ┌──────────────┐              │
-│  │  Nmap   │                   │  BM25 Search  │              │
-│  │Enhance  │                   │  + Version    │              │
-│  │(subproc)│                   │   Intervals   │              │
+│  │  Nmap   │                   │  BM25 Search │              │
+│  │Enhance  │                   │  + Version   │              │ 
+│  │(subproc)│                   │   Intervals  │              │
 │  └─────────┘                   └──────┬───────┘              │
-│                                       │                       │
-└───────────────────────────────────────┼───────────────────────┘
+│                                       │                      │
+└───────────────────────────────────────┼──────────────────────┘
                                         │
                               ┌─────────▼─────────┐
-                              │  SQLite (WAL mode)  │
-                              │  ├─ exploits         │
-                              │  ├─ exploits_fts     │
-                              │  ├─ cve_index        │
-                              │  └─ cpe_mappings     │
-                              └─────────────────────┘
+                              │  SQLite (WAL mode)│
+                              │  ├─ exploits      │
+                              │  ├─ exploits_fts  │
+                              │  ├─ cve_index     │
+                              │  └─ cpe_mappings  │
+                              └───────────────────┘
 ```
 
 ### Data Pipeline
