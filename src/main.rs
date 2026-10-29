@@ -435,7 +435,7 @@ async fn cmd_update_db(args: &[String]) {
     match VulnDb::open(&db_path) {
         Ok(db) => {
             if let Some(ref path) = file_path {
-                let content = match std::fs::read_to_string(&path) {
+                let content = match std::fs::read_to_string(path) {
                     Ok(c) => c,
                     Err(e) => {
                         eprintln!("Failed to read {}: {}", path.display(), e);
