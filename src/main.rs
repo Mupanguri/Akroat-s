@@ -1,16 +1,20 @@
+use ipnetwork::IpNetwork;
+use serde_json::Value;
 use std::env;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process;
 use std::str::FromStr;
 use std::time::Duration;
-use ipnetwork::IpNetwork;
 use tracing_subscriber::EnvFilter;
-use serde_json::Value;
 
-use std::sync::Arc;
+use port_sniffer::vuln::{
+    db::VulnDb,
+    engine::VulnEngine,
+    search::{parse_query, SploitQuery},
+};
 use port_sniffer::{config::Config, scan_ports, ScanConfig};
-use port_sniffer::vuln::{db::VulnDb, engine::VulnEngine, search::{SploitQuery, parse_query}};
+use std::sync::Arc;
 
 fn usage(program: &str) {
     eprintln!(
@@ -47,17 +51,31 @@ fn parse_port_range(s: &str) -> Result<Vec<u16>, &'static str> {
     let mut ports = Vec::new();
     for part in s.split(',') {
         let part = part.trim();
-        if part.is_empty() { continue; }
+        if part.is_empty() {
+            continue;
+        }
         if let Some((start, end)) = part.split_once('-') {
-            let lo = start.trim().parse::<u16>().map_err(|_| "Invalid port in range")?;
-            let hi = end.trim().parse::<u16>().map_err(|_| "Invalid port in range")?;
-            if lo > hi { return Err("Range start > end"); }
-            for p in lo..=hi { ports.push(p); }
+            let lo = start
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| "Invalid port in range")?;
+            let hi = end
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| "Invalid port in range")?;
+            if lo > hi {
+                return Err("Range start > end");
+            }
+            for p in lo..=hi {
+                ports.push(p);
+            }
         } else {
             ports.push(part.parse::<u16>().map_err(|_| "Invalid port number")?);
         }
     }
-    if ports.is_empty() { return Err("Empty port range"); }
+    if ports.is_empty() {
+        return Err("Empty port range");
+    }
     Ok(ports)
 }
 
@@ -75,34 +93,63 @@ impl ScanArguments {
         while *i < args.len() {
             match args[*i].as_str() {
                 "-j" => {
-                    if *i + 1 >= args.len() { return Err("-j requires <threads>"); }
+                    if *i + 1 >= args.len() {
+                        return Err("-j requires <threads>");
+                    }
                     threads = args[*i + 1].parse::<u16>().map_err(|_| "Invalid threads")?;
                     *i += 2;
                 }
                 "--port-range" => {
-                    if *i + 1 >= args.len() { return Err("--port-range requires argument"); }
+                    if *i + 1 >= args.len() {
+                        return Err("--port-range requires argument");
+                    }
                     ports = Some(parse_port_range(&args[*i + 1])?);
                     *i += 2;
                 }
-                "--no-service" => { enable_service_detection = false; *i += 1; }
-                "--deep" => { deep_inspection = true; *i += 1; }
-                "--syn" => { syn_scan = true; *i += 1; }
-                "--udp" => { udp_scan = true; *i += 1; }
-                "--json" => { output_json = true; *i += 1; }
+                "--no-service" => {
+                    enable_service_detection = false;
+                    *i += 1;
+                }
+                "--deep" => {
+                    deep_inspection = true;
+                    *i += 1;
+                }
+                "--syn" => {
+                    syn_scan = true;
+                    *i += 1;
+                }
+                "--udp" => {
+                    udp_scan = true;
+                    *i += 1;
+                }
+                "--json" => {
+                    output_json = true;
+                    *i += 1;
+                }
                 arg => {
-                    if !ipaddr_str.is_empty() { return Err("Only one IP address allowed"); }
+                    if !ipaddr_str.is_empty() {
+                        return Err("Only one IP address allowed");
+                    }
                     ipaddr_str = arg.to_string();
                     *i += 1;
                 }
             }
         }
 
-        if ipaddr_str.is_empty() { return Err("No IP address specified"); }
+        if ipaddr_str.is_empty() {
+            return Err("No IP address specified");
+        }
         let ipaddr = IpAddr::from_str(&ipaddr_str).map_err(|_| "Invalid IP address")?;
 
         Ok(ScanArguments {
-            ipaddr, threads, enable_service_detection,
-            deep_inspection, syn_scan, udp_scan, ports, output_json,
+            ipaddr,
+            threads,
+            enable_service_detection,
+            deep_inspection,
+            syn_scan,
+            udp_scan,
+            ports,
+            output_json,
         })
     }
 }
@@ -154,7 +201,10 @@ fn cmd_search(query_args: &[String]) {
                                 for r in &results {
                                     let verified = if r.verified { "[VERIFIED]" } else { "" };
                                     println!("  EDB-{} {} {}", r.edb_id, r.title, verified);
-                                    println!("         Platform: {} | Type: {}", r.platform, r.exploit_type);
+                                    println!(
+                                        "         Platform: {} | Type: {}",
+                                        r.platform, r.exploit_type
+                                    );
                                     println!("         URL: {}", r.url);
                                     if !r.cve_ids.is_empty() {
                                         println!("         CVEs: {}", r.cve_ids.join(", "));
@@ -166,50 +216,61 @@ fn cmd_search(query_args: &[String]) {
                         Err(e) => eprintln!("Search error: {}", e),
                     }
                 }
-                SploitQuery::CveId(ref cve) => {
-                    match db.search_by_cve(cve) {
-                        Ok(results) => {
-                            if results.is_empty() {
-                                println!("No exploits found for {}", cve);
-                            } else {
-                                println!("Found {} exploit(s) for {}:\n", results.len(), cve);
-                                for r in &results {
-                                    let verified = if r.verified { "[VERIFIED]" } else { "" };
-                                    println!("  EDB-{} {} {}", r.edb_id, r.title, verified);
-                                    println!("         URL: {}", r.url);
-                                    println!();
-                                }
+                SploitQuery::CveId(ref cve) => match db.search_by_cve(cve) {
+                    Ok(results) => {
+                        if results.is_empty() {
+                            println!("No exploits found for {}", cve);
+                        } else {
+                            println!("Found {} exploit(s) for {}:\n", results.len(), cve);
+                            for r in &results {
+                                let verified = if r.verified { "[VERIFIED]" } else { "" };
+                                println!("  EDB-{} {} {}", r.edb_id, r.title, verified);
+                                println!("         URL: {}", r.url);
+                                println!();
                             }
                         }
-                        Err(e) => eprintln!("Search error: {}", e),
                     }
-                }
-                SploitQuery::EdbId(edb) => {
-                    match db.search_exploits(&edb.to_string(), 1) {
-                        Ok(results) if !results.is_empty() => {
-                            let r = &results[0];
-                            let verified = if r.verified { "[VERIFIED]" } else { "" };
-                            println!("EDB-{} {} {}", r.edb_id, r.title, verified);
-                            println!("  Platform: {}", r.platform);
-                            println!("  Type: {}", r.exploit_type);
-                            println!("  Author: {}", r.author.as_deref().unwrap_or("unknown"));
-                            println!("  Date: {}", r.date.as_deref().unwrap_or("unknown"));
-                            println!("  URL: {}", r.url);
-                            if !r.cve_ids.is_empty() {
-                                println!("  CVEs: {}", r.cve_ids.join(", "));
-                            }
+                    Err(e) => eprintln!("Search error: {}", e),
+                },
+                SploitQuery::EdbId(edb) => match db.search_exploits(&edb.to_string(), 1) {
+                    Ok(results) if !results.is_empty() => {
+                        let r = &results[0];
+                        let verified = if r.verified { "[VERIFIED]" } else { "" };
+                        println!("EDB-{} {} {}", r.edb_id, r.title, verified);
+                        println!("  Platform: {}", r.platform);
+                        println!("  Type: {}", r.exploit_type);
+                        println!("  Author: {}", r.author.as_deref().unwrap_or("unknown"));
+                        println!("  Date: {}", r.date.as_deref().unwrap_or("unknown"));
+                        println!("  URL: {}", r.url);
+                        if !r.cve_ids.is_empty() {
+                            println!("  CVEs: {}", r.cve_ids.join(", "));
                         }
-                        _ => println!("No exploit found for EDB-{}", edb),
                     }
-                }
-                SploitQuery::ServiceVersion { ref product, ref version } => {
+                    _ => println!("No exploit found for EDB-{}", edb),
+                },
+                SploitQuery::ServiceVersion {
+                    ref product,
+                    ref version,
+                } => {
                     let mut engine = VulnEngine::new();
                     port_sniffer::vuln::exploit::import_into_engine(&mut engine, &db);
-                    let results = engine.match_service(product, version, &port_sniffer::vuln::engine::Severity::None);
+                    let results = engine.match_service(
+                        product,
+                        version,
+                        &port_sniffer::vuln::engine::Severity::None,
+                    );
                     if !results.is_empty() {
-                        println!("Found {} vulnerability(ies) for {} {}:\n", results.len(), product, version);
+                        println!(
+                            "Found {} vulnerability(ies) for {} {}:\n",
+                            results.len(),
+                            product,
+                            version
+                        );
                         for v in &results {
-                            let score_str = v.cvss_score.map(|s| format!("{:.1}", s)).unwrap_or_default();
+                            let score_str = v
+                                .cvss_score
+                                .map(|s| format!("{:.1}", s))
+                                .unwrap_or_default();
                             println!("  {} ({:?}) CVSS:{}", v.id, v.severity, score_str);
                             println!("         {}", v.description);
                             let exploits = engine.exploits_by_cve(&v.id);
@@ -231,7 +292,10 @@ fn cmd_search(query_args: &[String]) {
                                 for r in &results {
                                     let verified = if r.verified { "[VERIFIED]" } else { "" };
                                     println!("  EDB-{} {} {}", r.edb_id, r.title, verified);
-                                    println!("         Platform: {} | Type: {}", r.platform, r.exploit_type);
+                                    println!(
+                                        "         Platform: {} | Type: {}",
+                                        r.platform, r.exploit_type
+                                    );
                                     println!("         URL: {}", r.url);
                                     if !r.cve_ids.is_empty() {
                                         println!("         CVEs: {}", r.cve_ids.join(", "));
@@ -239,7 +303,10 @@ fn cmd_search(query_args: &[String]) {
                                     println!();
                                 }
                             }
-                            Ok(_) => println!("No exploits or vulnerabilities found for {} {}", product, version),
+                            Ok(_) => println!(
+                                "No exploits or vulnerabilities found for {} {}",
+                                product, version
+                            ),
                             Err(e) => eprintln!("Search error: {}", e),
                         }
                     } else {
@@ -264,7 +331,10 @@ fn parse_csv_line(line: &str) -> Vec<String> {
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            '"' if chars.peek() == Some(&'"') => { current.push('"'); chars.next(); }
+            '"' if chars.peek() == Some(&'"') => {
+                current.push('"');
+                chars.next();
+            }
             '"' => in_quotes = !in_quotes,
             ',' if !in_quotes => {
                 fields.push(current.trim().to_string());
@@ -277,19 +347,20 @@ fn parse_csv_line(line: &str) -> Vec<String> {
     fields
 }
 
-const EXPLOITDB_URL: &str = "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv";
+const EXPLOITDB_URL: &str =
+    "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv";
 
 fn download_csv(url: &str) -> Result<String, String> {
     let url = url.to_string();
     // Spawn a thread to avoid tokio runtime conflict (reqwest::blocking
     // creates its own runtime, which can't nest inside #[tokio::main])
     std::thread::spawn(move || -> Result<String, String> {
-        let resp = reqwest::blocking::get(&url)
-            .map_err(|e| format!("Download failed: {}", e))?;
+        let resp = reqwest::blocking::get(&url).map_err(|e| format!("Download failed: {}", e))?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
-        resp.text().map_err(|e| format!("Read response failed: {}", e))
+        resp.text()
+            .map_err(|e| format!("Read response failed: {}", e))
     })
     .join()
     .map_err(|_| "Download thread panicked".to_string())?
@@ -298,10 +369,14 @@ fn download_csv(url: &str) -> Result<String, String> {
 fn import_csv_content(db: &VulnDb, content: &str, source: &str) {
     let mut imported = 0;
     for line in content.lines().skip(1) {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
 
         let fields = parse_csv_line(line);
-        if fields.len() < 4 { continue; }
+        if fields.len() < 4 {
+            continue;
+        }
 
         let edb_id: u32 = match fields[0].trim().parse() {
             Ok(id) => id,
@@ -315,10 +390,7 @@ fn import_csv_content(db: &VulnDb, content: &str, source: &str) {
                     .split(';')
                     .filter_map(|c| {
                         let c = c.trim();
-                        if c.len() >= 10
-                            && c[..3].eq_ignore_ascii_case("cve")
-                            && c.contains('-')
-                        {
+                        if c.len() >= 10 && c[..3].eq_ignore_ascii_case("cve") && c.contains('-') {
                             Some(c.to_uppercase())
                         } else {
                             None
@@ -414,7 +486,9 @@ async fn cmd_update_db(args: &[String]) {
                 println!("  --file <path>      Path to exploit-db files_exploits.csv");
                 println!("  --download         Download exploits from exploit-db GitLab");
                 println!("  --download-cves    Download CVEs from NVD API");
-                println!("  --since <date>     Only fetch CVEs published after this date (YYYY-MM-DD)");
+                println!(
+                    "  --since <date>     Only fetch CVEs published after this date (YYYY-MM-DD)"
+                );
                 println!("  --api-key <key>    NVD API key (increases rate limit to 50 req/30s)");
                 println!("  --info             Show database stats");
                 println!("  --reset            Delete the database and start fresh");
@@ -458,7 +532,9 @@ async fn cmd_update_db(args: &[String]) {
             } else if download_cves {
                 import_nvd_cves(&db, since.as_deref(), api_key.as_deref()).await;
             } else {
-                println!("Database initialized (empty). Use --file or --download to import exploits.");
+                println!(
+                    "Database initialized (empty). Use --file or --download to import exploits."
+                );
             }
 
             // Rebuild engine after import
@@ -497,7 +573,11 @@ async fn import_nvd_cves(db: &VulnDb, since: Option<&str>, api_key: Option<&str>
 
     loop {
         let url = build_nvd_url(start_index, results_per_page, since, api_key.is_some());
-        println!("  Fetching page {} (offset={})...", (start_index / results_per_page) + 1, start_index);
+        println!(
+            "  Fetching page {} (offset={})...",
+            (start_index / results_per_page) + 1,
+            start_index
+        );
 
         let client = reqwest::Client::new();
         let mut req = client.get(&url);
@@ -529,8 +609,14 @@ async fn import_nvd_cves(db: &VulnDb, since: Option<&str>, api_key: Option<&str>
         };
 
         let total_results = json["totalResults"].as_u64().unwrap_or(0);
-        let vulnerabilities = json["vulnerabilities"].as_array().map(|a| a.len()).unwrap_or(0);
-        println!("  Got {} vulnerabilities (total: {})", vulnerabilities, total_results);
+        let vulnerabilities = json["vulnerabilities"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
+        println!(
+            "  Got {} vulnerabilities (total: {})",
+            vulnerabilities, total_results
+        );
 
         if vulnerabilities == 0 {
             break;
@@ -560,7 +646,12 @@ async fn import_nvd_cves(db: &VulnDb, since: Option<&str>, api_key: Option<&str>
     println!("\nImported {} CVEs from NVD.", total_imported);
 }
 
-fn build_nvd_url(start_index: usize, results_per_page: usize, since: Option<&str>, _has_key: bool) -> String {
+fn build_nvd_url(
+    start_index: usize,
+    results_per_page: usize,
+    since: Option<&str>,
+    _has_key: bool,
+) -> String {
     let mut url = format!(
         "https://services.nvd.nist.gov/rest/json/cves/2.0?startIndex={}&resultsPerPage={}",
         start_index, results_per_page
@@ -578,7 +669,8 @@ fn parse_nvd_cve_item(cve: &Value) -> Option<port_sniffer::vuln::engine::VulnRec
     let description = cve["descriptions"]
         .as_array()
         .and_then(|descs| {
-            descs.iter()
+            descs
+                .iter()
                 .find(|d| d["lang"].as_str() == Some("en"))
                 .and_then(|d| d["value"].as_str().map(|s| s.to_string()))
         })
@@ -598,35 +690,57 @@ fn parse_nvd_cve_item(cve: &Value) -> Option<port_sniffer::vuln::engine::VulnRec
                     if let Some(matches) = node["cpeMatch"].as_array() {
                         for cpe_match in matches {
                             let vulnerable = cpe_match["vulnerable"].as_bool().unwrap_or(false);
-                            if !vulnerable { continue; }
+                            if !vulnerable {
+                                continue;
+                            }
 
                             let criteria = cpe_match["criteria"].as_str().unwrap_or("");
-                            if criteria.is_empty() { continue; }
+                            if criteria.is_empty() {
+                                continue;
+                            }
 
                             // Check for version range bounds
-                            let has_start = cpe_match.get("versionStartIncluding").or_else(|| cpe_match.get("versionStartExcluding")).is_some();
-                            let has_end = cpe_match.get("versionEndIncluding").or_else(|| cpe_match.get("versionEndExcluding")).is_some();
+                            let has_start = cpe_match
+                                .get("versionStartIncluding")
+                                .or_else(|| cpe_match.get("versionStartExcluding"))
+                                .is_some();
+                            let has_end = cpe_match
+                                .get("versionEndIncluding")
+                                .or_else(|| cpe_match.get("versionEndExcluding"))
+                                .is_some();
 
                             if has_start || has_end {
                                 // Build affected CPE from versionStart
-                                if let Some(start_ver) = cpe_match.get("versionStartIncluding").and_then(|v| v.as_str()) {
+                                if let Some(start_ver) = cpe_match
+                                    .get("versionStartIncluding")
+                                    .and_then(|v| v.as_str())
+                                {
                                     if let Some(filled) = fill_cpe_version(criteria, start_ver) {
                                         affected_cpe.push(filled);
                                     }
                                 }
-                                if let Some(start_ver) = cpe_match.get("versionStartExcluding").and_then(|v| v.as_str()) {
+                                if let Some(start_ver) = cpe_match
+                                    .get("versionStartExcluding")
+                                    .and_then(|v| v.as_str())
+                                {
                                     if let Some(filled) = fill_cpe_version(criteria, start_ver) {
                                         affected_cpe.push(filled);
                                     }
                                 }
 
                                 // Build fixed CPE from versionEnd
-                                if let Some(end_ver) = cpe_match.get("versionEndIncluding").and_then(|v| v.as_str()) {
+                                if let Some(end_ver) = cpe_match
+                                    .get("versionEndIncluding")
+                                    .and_then(|v| v.as_str())
+                                {
                                     if let Some(filled) = fill_cpe_version(criteria, end_ver) {
                                         fixed_cpe.push(filled);
                                     }
                                 }
-                                if let Some(end_ver) = cpe_match.get("versionEndExcluding").and_then(|v| v.as_str()) {
+                                if let Some(end_ver) = cpe_match
+                                    .get("versionEndExcluding")
+                                    .and_then(|v| v.as_str())
+                                {
                                     if let Some(filled) = fill_cpe_version(criteria, end_ver) {
                                         fixed_cpe.push(filled);
                                     }
@@ -674,34 +788,88 @@ fn parse_nvd_cve_item(cve: &Value) -> Option<port_sniffer::vuln::engine::VulnRec
 }
 
 /// Extract CVSS v3 severity/score (fall back to v2)
-fn extract_cvss(cve: &Value) -> (port_sniffer::vuln::engine::Severity, Option<f32>, Option<String>) {
+fn extract_cvss(
+    cve: &Value,
+) -> (
+    port_sniffer::vuln::engine::Severity,
+    Option<f32>,
+    Option<String>,
+) {
     // Try CVSS v3.1 first
-    if let Some(metrics) = cve["metrics"]["cvssMetricV31"].as_array().and_then(|a| a.first()) {
+    if let Some(metrics) = cve["metrics"]["cvssMetricV31"]
+        .as_array()
+        .and_then(|a| a.first())
+    {
         if let Some(data) = metrics["cvssData"].as_object() {
-            let sev_str = data.get("baseSeverity").and_then(|v| v.as_str()).unwrap_or("NONE");
-            let score = data.get("baseScore").and_then(|v| v.as_f64()).map(|s| s as f32);
-            let vector = data.get("vectorString").and_then(|v| v.as_str()).map(|s| s.to_string());
-            return (port_sniffer::vuln::engine::Severity::parse(sev_str), score, vector);
+            let sev_str = data
+                .get("baseSeverity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("NONE");
+            let score = data
+                .get("baseScore")
+                .and_then(|v| v.as_f64())
+                .map(|s| s as f32);
+            let vector = data
+                .get("vectorString")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            return (
+                port_sniffer::vuln::engine::Severity::parse(sev_str),
+                score,
+                vector,
+            );
         }
     }
 
     // Fall back to CVSS v3.0
-    if let Some(metrics) = cve["metrics"]["cvssMetricV30"].as_array().and_then(|a| a.first()) {
+    if let Some(metrics) = cve["metrics"]["cvssMetricV30"]
+        .as_array()
+        .and_then(|a| a.first())
+    {
         if let Some(data) = metrics["cvssData"].as_object() {
-            let sev_str = data.get("baseSeverity").and_then(|v| v.as_str()).unwrap_or("NONE");
-            let score = data.get("baseScore").and_then(|v| v.as_f64()).map(|s| s as f32);
-            let vector = data.get("vectorString").and_then(|v| v.as_str()).map(|s| s.to_string());
-            return (port_sniffer::vuln::engine::Severity::parse(sev_str), score, vector);
+            let sev_str = data
+                .get("baseSeverity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("NONE");
+            let score = data
+                .get("baseScore")
+                .and_then(|v| v.as_f64())
+                .map(|s| s as f32);
+            let vector = data
+                .get("vectorString")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            return (
+                port_sniffer::vuln::engine::Severity::parse(sev_str),
+                score,
+                vector,
+            );
         }
     }
 
     // Fall back to CVSS v2.0
-    if let Some(metrics) = cve["metrics"]["cvssMetricV2"].as_array().and_then(|a| a.first()) {
+    if let Some(metrics) = cve["metrics"]["cvssMetricV2"]
+        .as_array()
+        .and_then(|a| a.first())
+    {
         if let Some(data) = metrics["cvssData"].as_object() {
-            let sev_str = data.get("baseSeverity").and_then(|v| v.as_str()).unwrap_or("NONE");
-            let score = data.get("baseScore").and_then(|v| v.as_f64()).map(|s| s as f32);
-            let vector = data.get("vectorString").and_then(|v| v.as_str()).map(|s| s.to_string());
-            return (port_sniffer::vuln::engine::Severity::parse(sev_str), score, vector);
+            let sev_str = data
+                .get("baseSeverity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("NONE");
+            let score = data
+                .get("baseScore")
+                .and_then(|v| v.as_f64())
+                .map(|s| s as f32);
+            let vector = data
+                .get("vectorString")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            return (
+                port_sniffer::vuln::engine::Severity::parse(sev_str),
+                score,
+                vector,
+            );
         }
     }
 
@@ -754,8 +922,11 @@ async fn cmd_scan(program: &str, args: &[String]) {
             tracing::warn!("Vulnerability engine loaded with {} exploits but 0 CVEs — version-interval matching disabled (only FTS5 exploit search available).",
                 db.exploit_count().unwrap_or(0));
         } else {
-            tracing::info!("Vulnerability engine loaded ({} exploits, {} CVEs)",
-                db.exploit_count().unwrap_or(0), cve_count);
+            tracing::info!(
+                "Vulnerability engine loaded ({} exploits, {} CVEs)",
+                db.exploit_count().unwrap_or(0),
+                cve_count
+            );
         }
     } else {
         tracing::warn!("No vulnerability database found — CVE matching disabled");
@@ -796,9 +967,20 @@ async fn cmd_scan(program: &str, args: &[String]) {
                 } else {
                     String::new()
                 };
-                println!("{} is open - {} {} ({}){}", result.port, service.name, version_info, product_info, vuln_suffix);
+                println!(
+                    "{} is open - {} {} ({}){}",
+                    result.port, service.name, version_info, product_info, vuln_suffix
+                );
                 for v in &result.vulnerabilities {
-                    println!("         [{}] {} (score: {:?}, exploits: {})", v.severity, v.cve_id, v.cvss_score.map(|s| format!("{:.1}", s)).unwrap_or_default(), v.exploit_count);
+                    println!(
+                        "         [{}] {} (score: {:?}, exploits: {})",
+                        v.severity,
+                        v.cve_id,
+                        v.cvss_score
+                            .map(|s| format!("{:.1}", s))
+                            .unwrap_or_default(),
+                        v.exploit_count
+                    );
                 }
             } else {
                 println!("{} is open", result.port);
