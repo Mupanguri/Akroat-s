@@ -43,8 +43,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
       - name: Run cargo-audit (RustSec Advisory DB)
-        uses: rustsec/cargo-audit-action@v2
+        run: cargo audit
 
       - name: Run Syft SBOM Generator & Grype SCA Scan
         uses: anchore/scan-action@v3
