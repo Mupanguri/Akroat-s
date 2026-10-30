@@ -810,7 +810,7 @@ impl Akroatis {
                                         }
                                         ui.colored_label(
                                             get_severity_color(&v.severity),
-                                            format!("{}", v.severity),
+                                            v.severity.to_string(),
                                         );
                                         if v.has_exploit {
                                             ui.colored_label(egui::Color32::RED, "[EXPLOIT]");
@@ -857,8 +857,8 @@ impl Akroatis {
             ui.checkbox(&mut self.filter_vulnerabilities, "Vulnerable only");
             ui.separator();
             ui.label("Sort:");
-            if ui.selectable_label(true, "Port").clicked() {}
-            if ui.selectable_label(false, "Severity").clicked() {}
+            ui.selectable_label(true, "Port").clicked();
+            ui.selectable_label(false, "Severity").clicked();
         });
         ui.separator();
 
