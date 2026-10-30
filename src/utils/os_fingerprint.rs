@@ -24,15 +24,9 @@ pub fn fingerprint_os(ip: &str, port: u16, timeout_ms: u64) -> Option<OsFingerpr
             0..=32 => "Some embedded / real-time OS".to_string(),
             33..=64 => "Linux / Unix".to_string(),
             65..=96 => "Windows 10 / 11 / Server 2022".to_string(),
-            97..=128 => {
-                "Windows 10 / 11 / Server 2019+".to_string()
-            }
-            129..=192 => {
-                "Windows (older) / Cisco IOS".to_string()
-            }
-            193..=255 => {
-                "Solaris / AIX / HP-UX".to_string()
-            }
+            97..=128 => "Windows 10 / 11 / Server 2019+".to_string(),
+            129..=192 => "Windows (older) / Cisco IOS".to_string(),
+            193..=255 => "Solaris / AIX / HP-UX".to_string(),
             _ => "Unknown".to_string(),
         };
 

@@ -1,6 +1,6 @@
 use crate::services::banner_grabber::grab_banner_with_retries;
-use regex::Regex;
 use crate::ServiceInfo;
+use regex::Regex;
 
 /// Detect SSH service and extract version information
 pub async fn detect_ssh(ip: &str, port: u16) -> Option<ServiceInfo> {

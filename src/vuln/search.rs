@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use crate::vuln::engine::{SearchFilters, SearchResult, Severity, Version, VulnEngine};
+use std::sync::Arc;
 
 /// Query type for the search dispatcher
 #[derive(Debug, Clone)]
@@ -7,8 +7,15 @@ pub enum SploitQuery {
     CveId(String),
     EdbId(u32),
     Keyword(String),
-    ServiceVersion { product: String, version: String },
-    Combined { text: String, platform: Option<String>, etype: Option<String> },
+    ServiceVersion {
+        product: String,
+        version: String,
+    },
+    Combined {
+        text: String,
+        platform: Option<String>,
+        etype: Option<String>,
+    },
 }
 
 /// Search dispatcher — routes queries to the optimal path
@@ -65,7 +72,11 @@ pub fn search(engine: &VulnEngine, query: &SploitQuery) -> Vec<SearchResult> {
                 })
                 .collect()
         }
-        SploitQuery::Combined { text, platform, etype } => {
+        SploitQuery::Combined {
+            text,
+            platform,
+            etype,
+        } => {
             let filters = SearchFilters {
                 limit: 20,
                 platform: platform.clone(),
@@ -92,10 +103,7 @@ pub fn parse_query(raw: &str) -> SploitQuery {
     let trimmed = raw.trim();
 
     // CVE ID pattern
-    if trimmed.len() >= 10
-        && trimmed[..3].to_uppercase() == "CVE"
-        && trimmed.contains('-')
-    {
+    if trimmed.len() >= 10 && trimmed[..3].to_uppercase() == "CVE" && trimmed.contains('-') {
         return SploitQuery::CveId(trimmed.to_string());
     }
 
@@ -122,11 +130,19 @@ pub fn parse_query(raw: &str) -> SploitQuery {
 
     // Platform/type pattern: "windows rce" or "linux local"
     let lower = trimmed.to_lowercase();
-    let platforms = ["windows", "linux", "macos", "android", "ios", "bsd", "solaris"];
+    let platforms = [
+        "windows", "linux", "macos", "android", "ios", "bsd", "solaris",
+    ];
     let types = ["remote", "local", "dos", "webapps", "shellcode", "payload"];
 
-    let platform = platforms.iter().find(|p| lower.contains(*p)).map(|p| p.to_string());
-    let etype = types.iter().find(|t| lower.contains(*t)).map(|t| t.to_string());
+    let platform = platforms
+        .iter()
+        .find(|p| lower.contains(*p))
+        .map(|p| p.to_string());
+    let etype = types
+        .iter()
+        .find(|t| lower.contains(*t))
+        .map(|t| t.to_string());
 
     if platform.is_some() || etype.is_some() {
         SploitQuery::Combined {
@@ -141,15 +157,13 @@ pub fn parse_query(raw: &str) -> SploitQuery {
 
 /// Stop words filtered from search queries
 const STOP_WORDS: &[&str] = &[
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "by", "with", "from", "is", "are", "was", "were", "be", "been",
-    "being", "have", "has", "had", "do", "does", "did", "will", "would",
-    "could", "should", "may", "might", "shall", "can", "need", "dare",
-    "this", "that", "these", "those", "it", "its", "they", "them", "he",
-    "she", "we", "you", "all", "each", "every", "both", "few", "more",
-    "most", "some", "any", "no", "not", "only", "own", "same", "so",
-    "than", "too", "very", "just", "about", "above", "after", "again",
-    "then", "there", "under", "up", "down", "out", "off", "over",
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "by", "with",
+    "from", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
+    "did", "will", "would", "could", "should", "may", "might", "shall", "can", "need", "dare",
+    "this", "that", "these", "those", "it", "its", "they", "them", "he", "she", "we", "you", "all",
+    "each", "every", "both", "few", "more", "most", "some", "any", "no", "not", "only", "own",
+    "same", "so", "than", "too", "very", "just", "about", "above", "after", "again", "then",
+    "there", "under", "up", "down", "out", "off", "over",
 ];
 
 // ─── Tests ─────────────────────────────────────────────────────────────────

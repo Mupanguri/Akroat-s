@@ -2,7 +2,7 @@ use crate::services::banner_grabber::grab_banner_with_retries;
 use crate::ServiceInfo;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time::{Duration, timeout};
+use tokio::time::{timeout, Duration};
 
 /// Detect SMB service and extract version information
 pub async fn detect_smb(ip: &str, port: u16) -> Option<ServiceInfo> {
@@ -46,7 +46,9 @@ fn build_smb_negotiate_request() -> Vec<u8> {
     buf.extend_from_slice(b"\xff\x53\x4d\x42");
     buf.extend_from_slice(b"\x72\x00\x00\x00\x00\x18\x53\xc8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
     buf.extend_from_slice(b"\xfe\x53\x4d\x42\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
-    buf.extend_from_slice(b"\x02\x00\x02\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
+    buf.extend_from_slice(
+        b"\x02\x00\x02\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+    );
     buf.extend_from_slice(b"\x02\x10\x02\x02\x03\x02\x00\x00\x00\x00\x00\x00\x00\x00");
     buf
 }
@@ -124,7 +126,9 @@ pub async fn enumerate_smb_shares(ip: &str, port: u16) -> Option<Vec<String>> {
                         }
                         Some(shares)
                     } else {
-                        Some(vec!["SMB detected (negotiate response unparseable)".to_string()])
+                        Some(vec![
+                            "SMB detected (negotiate response unparseable)".to_string()
+                        ])
                     }
                 }
                 _ => Some(vec!["SMB detected (no negotiate response)".to_string()]),

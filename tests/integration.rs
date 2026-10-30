@@ -1,5 +1,5 @@
-use port_sniffer::vuln::engine::*;
 use port_sniffer::vuln::db::VulnDb;
+use port_sniffer::vuln::engine::*;
 use std::path::PathBuf;
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -283,7 +283,7 @@ fn test_engine_exploits_by_cve() {
 #[test]
 fn test_engine_full_pipeline() {
     // Simulate the full pipeline: DB import → engine init → match
-    
+
     // Step 1: Create a VulnRecord that mirrors an NVD entry
     let vuln = VulnRecord {
         id: "CVE-2021-41773".to_string(),
@@ -291,28 +291,22 @@ fn test_engine_full_pipeline() {
         severity: Severity::High,
         cvss_score: Some(7.5),
         cvss_vector: Some("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N".to_string()),
-        affected_cpe: vec![
-            "cpe:2.3:a:apache:http_server:2.4.38:*:*:*:*:*:*:*".to_string(),
-        ],
-        fixed_cpe: vec![
-            "cpe:2.3:a:apache:http_server:2.4.39:*:*:*:*:*:*:*".to_string(),
-        ],
+        affected_cpe: vec!["cpe:2.3:a:apache:http_server:2.4.38:*:*:*:*:*:*:*".to_string()],
+        fixed_cpe: vec!["cpe:2.3:a:apache:http_server:2.4.39:*:*:*:*:*:*:*".to_string()],
         references: vec![],
         published_date: Some("2021-10-05".to_string()),
         last_modified: None,
-        exploits: vec![
-            ExploitRecord {
-                edb_id: 51193,
-                title: "Apache 2.4.38 Path Traversal".to_string(),
-                platform: "linux".to_string(),
-                exploit_type: "remote".to_string(),
-                verified: true,
-                url: "https://www.exploit-db.com/exploits/51193".to_string(),
-                author: Some("test".to_string()),
-                date: Some("2021-10-05".to_string()),
-                cve_ids: vec!["CVE-2021-41773".to_string()],
-            },
-        ],
+        exploits: vec![ExploitRecord {
+            edb_id: 51193,
+            title: "Apache 2.4.38 Path Traversal".to_string(),
+            platform: "linux".to_string(),
+            exploit_type: "remote".to_string(),
+            verified: true,
+            url: "https://www.exploit-db.com/exploits/51193".to_string(),
+            author: Some("test".to_string()),
+            date: Some("2021-10-05".to_string()),
+            cve_ids: vec!["CVE-2021-41773".to_string()],
+        }],
     };
 
     // Step 2: Initialize engine with the vulnerability
@@ -348,7 +342,8 @@ fn test_vulndb_import_and_search() {
         date: Some("2021-10-05".to_string()),
         cve_ids: vec!["CVE-2021-41773".to_string()],
     };
-    db.import_exploit(&exploit).expect("Failed to import exploit");
+    db.import_exploit(&exploit)
+        .expect("Failed to import exploit");
 
     assert_eq!(db.exploit_count().unwrap(), 1);
 
@@ -376,7 +371,8 @@ fn test_vulndb_cve_cache() {
 
     assert!(db.cache_get("nonexistent").is_none());
 
-    db.cache_set("test-key", r#"{"data": "test"}"#).expect("Cache set failed");
+    db.cache_set("test-key", r#"{"data": "test"}"#)
+        .expect("Cache set failed");
     let cached = db.cache_get("test-key");
     assert!(cached.is_some());
     assert_eq!(cached.unwrap(), r#"{"data": "test"}"#);
@@ -390,17 +386,17 @@ fn test_version_interval_binary_search() {
     let mut engine = VulnEngine::new();
 
     // Insert CVEs with version intervals across a range
-    for (i, ver) in ["1.0.0", "1.1.0", "1.2.0", "2.0.0", "2.1.0"].iter().enumerate() {
+    for (i, ver) in ["1.0.0", "1.1.0", "1.2.0", "2.0.0", "2.1.0"]
+        .iter()
+        .enumerate()
+    {
         engine.insert_vuln(VulnRecord {
             id: format!("CVE-2021-{:04}", i + 1),
             description: format!("Bug in version {}", ver),
             severity: Severity::Medium,
             cvss_score: None,
             cvss_vector: None,
-            affected_cpe: vec![format!(
-                "cpe:2.3:a:test:product:{}:*:*:*:*:*:*:*",
-                ver
-            )],
+            affected_cpe: vec![format!("cpe:2.3:a:test:product:{}:*:*:*:*:*:*:*", ver)],
             fixed_cpe: vec![],
             references: vec![],
             published_date: None,
@@ -546,7 +542,11 @@ fn test_engine_match_service_wired_to_port_result() {
     // Access engine and match service
     let engine = port_sniffer::vuln::exploit::get_engine().expect("engine not set");
     let results = engine.match_service("apache", "2.4.38", &Severity::None);
-    assert_eq!(results.len(), 1, "Should match Apache 2.4.38 to CVE-2021-41773");
+    assert_eq!(
+        results.len(),
+        1,
+        "Should match Apache 2.4.38 to CVE-2021-41773"
+    );
     assert_eq!(results[0].id, "CVE-2021-41773");
 
     // Exploit is linked via cve_exploit_index, not embedded in VulnRecord
@@ -556,7 +556,8 @@ fn test_engine_match_service_wired_to_port_result() {
 
     // Simulate building a PortResult with matched CVEs (realistic product name)
     let mut port_result = port_sniffer::PortResult::new(
-        80, true,
+        80,
+        true,
         Some(port_sniffer::ServiceInfo {
             name: "HTTP".to_string(),
             version: Some("2.4.38".to_string()),
@@ -564,16 +565,20 @@ fn test_engine_match_service_wired_to_port_result() {
             extrainfo: None,
             cpe: None,
         }),
-        None, None, vec![],
+        None,
+        None,
+        vec![],
     );
     for v in engine.match_service("Apache HTTP Server", "2.4.38", &Severity::None) {
-        port_result.vulnerabilities.push(port_sniffer::VulnerabilityInfo {
-            cve_id: v.id.clone(),
-            severity: format!("{:?}", v.severity),
-            cvss_score: v.cvss_score,
-            description: v.description.clone(),
-            exploit_count: exploits.len(),
-        });
+        port_result
+            .vulnerabilities
+            .push(port_sniffer::VulnerabilityInfo {
+                cve_id: v.id.clone(),
+                severity: format!("{:?}", v.severity),
+                cvss_score: v.cvss_score,
+                description: v.description.clone(),
+                exploit_count: exploits.len(),
+            });
     }
     assert_eq!(port_result.vulnerabilities.len(), 1);
     assert_eq!(port_result.vulnerabilities[0].cve_id, "CVE-2021-41773");

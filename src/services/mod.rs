@@ -1,23 +1,19 @@
 pub mod banner_grabber;
 pub mod ftp;
-pub mod http;
-pub mod ssh;
-pub mod smb;
 pub mod generic;
+pub mod http;
+pub mod smb;
+pub mod ssh;
 pub mod tls;
 
 #[cfg(test)]
 mod tests;
 
-use crate::ServiceInfo;
 use crate::services::{
-    banner_grabber::grab_banner,
-    ftp::detect_ftp,
-    http::detect_http,
-    ssh::detect_ssh,
-    smb::detect_smb,
-    generic::detect_generic_service,
+    banner_grabber::grab_banner, ftp::detect_ftp, generic::detect_generic_service,
+    http::detect_http, smb::detect_smb, ssh::detect_ssh,
 };
+use crate::ServiceInfo;
 use async_trait::async_trait;
 
 struct Probe {
@@ -26,10 +22,22 @@ struct Probe {
 }
 
 const PROBES: &[Probe] = &[
-    Probe { name: "HTTP", pattern: r"(?i)HTTP/1\.[01]" },
-    Probe { name: "SSH", pattern: r"^SSH-\d\.\d" },
-    Probe { name: "FTP", pattern: r"^220.*FTP" },
-    Probe { name: "MySQL", pattern: r"(?i)mysql" },
+    Probe {
+        name: "HTTP",
+        pattern: r"(?i)HTTP/1\.[01]",
+    },
+    Probe {
+        name: "SSH",
+        pattern: r"^SSH-\d\.\d",
+    },
+    Probe {
+        name: "FTP",
+        pattern: r"^220.*FTP",
+    },
+    Probe {
+        name: "MySQL",
+        pattern: r"(?i)mysql",
+    },
 ];
 
 #[async_trait]
@@ -41,7 +49,9 @@ trait ServiceDetector: Send + Sync {
 struct FtpDetector;
 #[async_trait]
 impl ServiceDetector for FtpDetector {
-    fn ports(&self) -> &[u16] { &[20, 21] }
+    fn ports(&self) -> &[u16] {
+        &[20, 21]
+    }
     async fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
         detect_ftp(ip, port).await
     }
@@ -50,7 +60,9 @@ impl ServiceDetector for FtpDetector {
 struct SshDetector;
 #[async_trait]
 impl ServiceDetector for SshDetector {
-    fn ports(&self) -> &[u16] { &[22] }
+    fn ports(&self) -> &[u16] {
+        &[22]
+    }
     async fn detect(&self, ip: &str, port: u16, _deep: bool) -> Option<ServiceInfo> {
         detect_ssh(ip, port).await
     }
@@ -59,7 +71,9 @@ impl ServiceDetector for SshDetector {
 struct HttpDetector;
 #[async_trait]
 impl ServiceDetector for HttpDetector {
-    fn ports(&self) -> &[u16] { &[80, 443, 8080, 8443] }
+    fn ports(&self) -> &[u16] {
+        &[80, 443, 8080, 8443]
+    }
     async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
         detect_http(ip, port, deep).await
     }
@@ -68,7 +82,9 @@ impl ServiceDetector for HttpDetector {
 struct SmbDetector;
 #[async_trait]
 impl ServiceDetector for SmbDetector {
-    fn ports(&self) -> &[u16] { &[139, 445] }
+    fn ports(&self) -> &[u16] {
+        &[139, 445]
+    }
     async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
         let mut info = detect_smb(ip, port).await?;
         if deep {
@@ -92,7 +108,9 @@ struct HintedDetector {
 }
 #[async_trait]
 impl ServiceDetector for HintedDetector {
-    fn ports(&self) -> &[u16] { self.ports }
+    fn ports(&self) -> &[u16] {
+        self.ports
+    }
     async fn detect(&self, ip: &str, port: u16, deep: bool) -> Option<ServiceInfo> {
         detect_generic_service(ip, port, self.hint, deep).await
     }
@@ -107,13 +125,34 @@ fn registry() -> &'static [Box<dyn ServiceDetector>] {
             Box::new(SshDetector),
             Box::new(HttpDetector),
             Box::new(SmbDetector),
-            Box::new(HintedDetector { ports: &[23], hint: "telnet" }),
-            Box::new(HintedDetector { ports: &[25], hint: "smtp" }),
-            Box::new(HintedDetector { ports: &[53], hint: "dns" }),
-            Box::new(HintedDetector { ports: &[110], hint: "pop3" }),
-            Box::new(HintedDetector { ports: &[143], hint: "imap" }),
-            Box::new(HintedDetector { ports: &[993], hint: "imaps" }),
-            Box::new(HintedDetector { ports: &[995], hint: "pop3s" }),
+            Box::new(HintedDetector {
+                ports: &[23],
+                hint: "telnet",
+            }),
+            Box::new(HintedDetector {
+                ports: &[25],
+                hint: "smtp",
+            }),
+            Box::new(HintedDetector {
+                ports: &[53],
+                hint: "dns",
+            }),
+            Box::new(HintedDetector {
+                ports: &[110],
+                hint: "pop3",
+            }),
+            Box::new(HintedDetector {
+                ports: &[143],
+                hint: "imap",
+            }),
+            Box::new(HintedDetector {
+                ports: &[993],
+                hint: "imaps",
+            }),
+            Box::new(HintedDetector {
+                ports: &[995],
+                hint: "pop3s",
+            }),
         ]
     })
 }

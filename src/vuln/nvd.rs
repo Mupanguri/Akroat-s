@@ -1,11 +1,11 @@
+use crate::vuln::cache;
+use crate::vuln::engine::Severity;
+use crate::vuln::exploit;
+use crate::ServiceInfo;
 use reqwest;
 use reqwest::Url;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde::{Serialize, Deserialize};
-use crate::ServiceInfo;
-use crate::vuln::exploit;
-use crate::vuln::engine::Severity;
-use crate::vuln::cache;
 
 /// Basic structure to hold vulnerability info
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,25 +28,82 @@ fn lookup_cpe(service: &ServiceInfo) -> Option<CpeEntry> {
     let product = service.product.as_deref().unwrap_or("").to_lowercase();
 
     match (name.as_str(), product.as_str()) {
-        (_, "openssh") | (_, "openbsd") => Some(CpeEntry { vendor: "openbsd", product_cpe: "openssh" }),
-        (_, "dropbear") => Some(CpeEntry { vendor: "dropbear_ssh", product_cpe: "dropbear_ssh" }),
-        (_, "vsftpd") => Some(CpeEntry { vendor: "vsftpd", product_cpe: "vsftpd" }),
-        (_, "proftpd") => Some(CpeEntry { vendor: "proftpd", product_cpe: "proftpd" }),
-        (_, "pure-ftpd") => Some(CpeEntry { vendor: "pureftpd", product_cpe: "pure-ftpd" }),
-        (_, "microsoft ftp service") => Some(CpeEntry { vendor: "microsoft", product_cpe: "ftp" }),
-        (_, "apache") | (_, "apache httpd") | (_, "apache_httpd") => Some(CpeEntry { vendor: "apache", product_cpe: "http_server" }),
-        (_, "nginx") => Some(CpeEntry { vendor: "nginx", product_cpe: "nginx" }),
-        (_, "microsoft-iis") | (_, "iis") | (_, "microsoft iis") => Some(CpeEntry { vendor: "microsoft", product_cpe: "iis" }),
-        (_, "samba") => Some(CpeEntry { vendor: "samba", product_cpe: "samba" }),
-        (_, "microsoft windows smb") => Some(CpeEntry { vendor: "microsoft", product_cpe: "windows" }),
-        ("ssh", _) => Some(CpeEntry { vendor: "openbsd", product_cpe: "openssh" }),
-        ("ftp", _) => Some(CpeEntry { vendor: "vsftpd", product_cpe: "vsftpd" }),
-        ("http", _) => Some(CpeEntry { vendor: "apache", product_cpe: "http_server" }),
-        ("smtp", _) => Some(CpeEntry { vendor: "exim", product_cpe: "exim" }),
-        ("mysql", _) => Some(CpeEntry { vendor: "oracle", product_cpe: "mysql" }),
-        ("postgresql", _) => Some(CpeEntry { vendor: "postgresql", product_cpe: "postgresql" }),
-        ("telnet", _) => Some(CpeEntry { vendor: "linux", product_cpe: "telnet" }),
-        ("dns", _) => Some(CpeEntry { vendor: "isc", product_cpe: "bind" }),
+        (_, "openssh") | (_, "openbsd") => Some(CpeEntry {
+            vendor: "openbsd",
+            product_cpe: "openssh",
+        }),
+        (_, "dropbear") => Some(CpeEntry {
+            vendor: "dropbear_ssh",
+            product_cpe: "dropbear_ssh",
+        }),
+        (_, "vsftpd") => Some(CpeEntry {
+            vendor: "vsftpd",
+            product_cpe: "vsftpd",
+        }),
+        (_, "proftpd") => Some(CpeEntry {
+            vendor: "proftpd",
+            product_cpe: "proftpd",
+        }),
+        (_, "pure-ftpd") => Some(CpeEntry {
+            vendor: "pureftpd",
+            product_cpe: "pure-ftpd",
+        }),
+        (_, "microsoft ftp service") => Some(CpeEntry {
+            vendor: "microsoft",
+            product_cpe: "ftp",
+        }),
+        (_, "apache") | (_, "apache httpd") | (_, "apache_httpd") => Some(CpeEntry {
+            vendor: "apache",
+            product_cpe: "http_server",
+        }),
+        (_, "nginx") => Some(CpeEntry {
+            vendor: "nginx",
+            product_cpe: "nginx",
+        }),
+        (_, "microsoft-iis") | (_, "iis") | (_, "microsoft iis") => Some(CpeEntry {
+            vendor: "microsoft",
+            product_cpe: "iis",
+        }),
+        (_, "samba") => Some(CpeEntry {
+            vendor: "samba",
+            product_cpe: "samba",
+        }),
+        (_, "microsoft windows smb") => Some(CpeEntry {
+            vendor: "microsoft",
+            product_cpe: "windows",
+        }),
+        ("ssh", _) => Some(CpeEntry {
+            vendor: "openbsd",
+            product_cpe: "openssh",
+        }),
+        ("ftp", _) => Some(CpeEntry {
+            vendor: "vsftpd",
+            product_cpe: "vsftpd",
+        }),
+        ("http", _) => Some(CpeEntry {
+            vendor: "apache",
+            product_cpe: "http_server",
+        }),
+        ("smtp", _) => Some(CpeEntry {
+            vendor: "exim",
+            product_cpe: "exim",
+        }),
+        ("mysql", _) => Some(CpeEntry {
+            vendor: "oracle",
+            product_cpe: "mysql",
+        }),
+        ("postgresql", _) => Some(CpeEntry {
+            vendor: "postgresql",
+            product_cpe: "postgresql",
+        }),
+        ("telnet", _) => Some(CpeEntry {
+            vendor: "linux",
+            product_cpe: "telnet",
+        }),
+        ("dns", _) => Some(CpeEntry {
+            vendor: "isc",
+            product_cpe: "bind",
+        }),
         _ => None,
     }
 }
@@ -91,24 +148,18 @@ async fn parse_nvd_response(response: reqwest::Response) -> Result<Vec<Vulnerabi
     let mut vulnerabilities = Vec::new();
     if let Some(vulnerabilities_list) = json["vulnerabilities"].as_array() {
         for vuln in vulnerabilities_list.iter().take(5) {
-            let cve_id = vuln["cve"]["id"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string();
+            let cve_id = vuln["cve"]["id"].as_str().unwrap_or("Unknown").to_string();
             let desc = vuln["cve"]["descriptions"][0]["value"]
                 .as_str()
                 .unwrap_or("No description")
                 .to_string();
-            let severity = vuln["cve"]["metrics"]["cvssMetricV31"][0]["cvssData"]
-                ["baseSeverity"]
+            let severity = vuln["cve"]["metrics"]["cvssMetricV31"][0]["cvssData"]["baseSeverity"]
                 .as_str()
                 .unwrap_or("N/A")
                 .to_string();
 
             let (has_exploit, exploit_url) = match exploit::check_exploit(&cve_id).await {
-                Ok(exploits) if !exploits.is_empty() => {
-                    (true, Some(exploits[0].url.clone()))
-                }
+                Ok(exploits) if !exploits.is_empty() => (true, Some(exploits[0].url.clone())),
                 _ => (false, None),
             };
 

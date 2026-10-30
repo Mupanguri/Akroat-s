@@ -1,8 +1,8 @@
+use lasso::{Rodeo, Spur};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
-use lasso::{Rodeo, Spur};
 
 // ─── Version ───────────────────────────────────────────────────────────────
 
@@ -175,7 +175,9 @@ pub struct CpeIndex {
 }
 
 impl Default for CpeIndex {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CpeIndex {
@@ -189,7 +191,10 @@ impl CpeIndex {
     pub fn insert(&mut self, vendor: &str, product: &str, cve_id: &str) {
         let key = format!("{}:{}", vendor, product);
         let interned = self.interner.get_or_intern(&key);
-        self.map.entry(interned).or_default().push(cve_id.to_string());
+        self.map
+            .entry(interned)
+            .or_default()
+            .push(cve_id.to_string());
     }
 
     pub fn lookup(&self, vendor: &str, product: &str) -> Option<&[String]> {
@@ -207,19 +212,20 @@ pub struct CveExploitIndex {
 }
 
 impl Default for CveExploitIndex {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CveExploitIndex {
     pub fn new() -> Self {
-        Self { map: HashMap::new() }
+        Self {
+            map: HashMap::new(),
+        }
     }
 
     pub fn insert(&mut self, cve_id: &str, edb_id: u32) {
-        self.map
-            .entry(cve_id.to_string())
-            .or_default()
-            .push(edb_id);
+        self.map.entry(cve_id.to_string()).or_default().push(edb_id);
     }
 
     pub fn lookup(&self, cve_id: &str) -> Option<&[u32]> {
@@ -349,7 +355,12 @@ impl VulnEngine {
     }
 
     /// Match a service (product + version) to known vulnerabilities
-    pub fn match_service(&self, product: &str, version: &str, min_severity: &Severity) -> Vec<Arc<VulnRecord>> {
+    pub fn match_service(
+        &self,
+        product: &str,
+        version: &str,
+        min_severity: &Severity,
+    ) -> Vec<Arc<VulnRecord>> {
         let ver = Version::parse(version);
         let mut matched = Vec::new();
 
@@ -380,9 +391,8 @@ impl VulnEngine {
                     let cpe_match = record.affected_cpe.iter().any(|cpe| {
                         let cpe_lower = cpe.to_lowercase();
                         cpe_lower.contains(&p_lower)
-                            || Self::parse_cpe_uri(cpe).is_some_and(|(vendor, _)| {
-                                p_lower.contains(&vendor)
-                            })
+                            || Self::parse_cpe_uri(cpe)
+                                .is_some_and(|(vendor, _)| p_lower.contains(&vendor))
                     });
                     if cpe_match || record.affected_cpe.is_empty() {
                         matched.push(Arc::clone(record));
@@ -417,7 +427,8 @@ impl VulnEngine {
 
             if let Some(postings) = self.inverted_index.get(term) {
                 for &(doc_id, tf) in postings {
-                    let doc_len = self.doc_lengths.get(doc_id as usize).copied().unwrap_or(1) as f64;
+                    let doc_len =
+                        self.doc_lengths.get(doc_id as usize).copied().unwrap_or(1) as f64;
                     let tf_component = (tf as f64 * (k1 + 1.0))
                         / (tf as f64 + k1 * (1.0 - b + b * doc_len / self.avgdl));
                     *scores.entry(doc_id).or_default() += idf * tf_component;
@@ -441,9 +452,10 @@ impl VulnEngine {
             }
 
             if let Some(ref platform) = filters.platform {
-                let has_p = vuln.exploits.iter().any(|e| {
-                    e.platform.to_lowercase().contains(&platform.to_lowercase())
-                });
+                let has_p = vuln
+                    .exploits
+                    .iter()
+                    .any(|e| e.platform.to_lowercase().contains(&platform.to_lowercase()));
                 if !has_p {
                     continue;
                 }
@@ -451,7 +463,9 @@ impl VulnEngine {
 
             if let Some(ref etype) = filters.exploit_type {
                 let has_t = vuln.exploits.iter().any(|e| {
-                    e.exploit_type.to_lowercase().contains(&etype.to_lowercase())
+                    e.exploit_type
+                        .to_lowercase()
+                        .contains(&etype.to_lowercase())
                 });
                 if !has_t {
                     continue;

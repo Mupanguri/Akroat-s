@@ -22,9 +22,15 @@ pub fn get_cached_vulns(product: &str, version: &str) -> Option<Vec<Vulnerabilit
 }
 
 /// Update the SQLite cache with fresh results
-pub fn update_cache(product: &str, version: &str, vulnerabilities: Vec<Vulnerability>) -> Result<(), VulnError> {
+pub fn update_cache(
+    product: &str,
+    version: &str,
+    vulnerabilities: Vec<Vulnerability>,
+) -> Result<(), VulnError> {
     let key = format!("{}:{}", product.to_lowercase(), version.to_lowercase());
-    let db = GLOBAL_DB.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+    let db = GLOBAL_DB
+        .lock()
+        .map_err(|e| VulnError::DbExecute(e.to_string()))?;
     if let Some(ref db) = *db {
         let json = serde_json::to_string(&vulnerabilities)?;
         db.cache_set(&key, &json)?;

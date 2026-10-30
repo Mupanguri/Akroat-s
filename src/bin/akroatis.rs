@@ -1,21 +1,21 @@
+use base64::{engine::general_purpose, Engine as _};
 use eframe::egui;
-use image::{ImageReader, GenericImageView};
+use futures::future::join_all;
+use image::{GenericImageView, ImageReader};
+use ipnetwork::IpNetwork;
+use port_sniffer::vuln::nvd::{fetch_vulnerabilities, Vulnerability};
+use port_sniffer::{config::Config, scan_ports, PortResult, ScanConfig};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
-use base64::{Engine as _, engine::general_purpose};
-use ipnetwork::IpNetwork;
-use futures::future::join_all;
-use tracing_subscriber::{EnvFilter, fmt::MakeWriter};
 use tokio::runtime::Runtime;
-use port_sniffer::{config::Config, scan_ports, PortResult, ScanConfig};
-use port_sniffer::vuln::nvd::{Vulnerability, fetch_vulnerabilities};
+use tracing_subscriber::{fmt::MakeWriter, EnvFilter};
 
 // ==================== LOGGING ====================
 
@@ -44,7 +44,9 @@ impl Write for SharedLogWriterInner {
 impl<'writer> MakeWriter<'writer> for SharedLogWriter {
     type Writer = SharedLogWriterInner;
     fn make_writer(&'writer self) -> Self::Writer {
-        SharedLogWriterInner { buffer: self.buffer.clone() }
+        SharedLogWriterInner {
+            buffer: self.buffer.clone(),
+        }
     }
 }
 
@@ -79,7 +81,9 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(move |_cc| {
             let log_buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-            let writer = SharedLogWriter { buffer: log_buffer.clone() };
+            let writer = SharedLogWriter {
+                buffer: log_buffer.clone(),
+            };
             tracing_subscriber::fmt()
                 .with_writer(writer)
                 .with_env_filter(
@@ -245,7 +249,10 @@ impl eframe::App for Akroatis {
 
         // Handle incoming vulnerability data
         while let Ok((port, vulns)) = self.vuln_receiver.try_recv() {
-            self.vulnerability_map.entry(port).or_default().extend(vulns);
+            self.vulnerability_map
+                .entry(port)
+                .or_default()
+                .extend(vulns);
         }
 
         // Drain tracing log buffer into terminal display
@@ -357,8 +364,7 @@ impl eframe::App for Akroatis {
                 ui.group(|ui| {
                     ui.label("Target Entry");
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.ip_input)
-                            .hint_text("192.168.1.0/24"),
+                        egui::TextEdit::singleline(&mut self.ip_input).hint_text("192.168.1.0/24"),
                     );
                     ui.label("Port Range (optional)");
                     ui.add(
@@ -457,25 +463,33 @@ impl eframe::App for Akroatis {
                 ui.label("Export Intelligence");
                 if ui.button("📝 Download .txt").clicked() {
                     match self.download_report() {
-                        Ok(f) => self.notify(format!("📝 Saved: {}", f), egui::Color32::LIGHT_GREEN),
+                        Ok(f) => {
+                            self.notify(format!("📝 Saved: {}", f), egui::Color32::LIGHT_GREEN)
+                        }
                         Err(e) => self.notify(format!("❌ TXT error: {}", e), egui::Color32::RED),
                     }
                 }
                 if ui.button("🌐 Download .html").clicked() {
                     match self.download_report_html() {
-                        Ok(f) => self.notify(format!("🌐 Saved: {}", f), egui::Color32::LIGHT_GREEN),
+                        Ok(f) => {
+                            self.notify(format!("🌐 Saved: {}", f), egui::Color32::LIGHT_GREEN)
+                        }
                         Err(e) => self.notify(format!("❌ HTML error: {}", e), egui::Color32::RED),
                     }
                 }
                 if ui.button("📕 Download .pdf").clicked() {
                     match self.download_report_pdf() {
-                        Ok(f) => self.notify(format!("📕 Saved: {}", f), egui::Color32::LIGHT_GREEN),
+                        Ok(f) => {
+                            self.notify(format!("📕 Saved: {}", f), egui::Color32::LIGHT_GREEN)
+                        }
                         Err(e) => self.notify(format!("❌ PDF error: {}", e), egui::Color32::RED),
                     }
                 }
                 if ui.button("📦 Download .json").clicked() {
                     match self.download_report_json() {
-                        Ok(f) => self.notify(format!("📦 Saved: {}", f), egui::Color32::LIGHT_GREEN),
+                        Ok(f) => {
+                            self.notify(format!("📦 Saved: {}", f), egui::Color32::LIGHT_GREEN)
+                        }
                         Err(e) => self.notify(format!("❌ JSON error: {}", e), egui::Color32::RED),
                     }
                 }
@@ -582,8 +596,7 @@ impl eframe::App for Akroatis {
                 ];
                 for (label, tab) in &tabs {
                     let is_active = self.active_tab == *tab;
-                    let mut btn =
-                        egui::Button::new(egui::RichText::new(*label).size(14.0));
+                    let mut btn = egui::Button::new(egui::RichText::new(*label).size(14.0));
                     if is_active {
                         btn = btn.fill(egui::Color32::from_rgb(0, 80, 20));
                     }
@@ -613,9 +626,7 @@ impl eframe::App for Akroatis {
                                 .stroke(egui::Stroke::new(1.0_f32, *color));
                             frame.show(ui, |ui: &mut egui::Ui| {
                                 ui.add(egui::Label::new(
-                                    egui::RichText::new(msg.clone())
-                                        .color(*color)
-                                        .size(13.0),
+                                    egui::RichText::new(msg.clone()).color(*color).size(13.0),
                                 ));
                             });
                         });
@@ -696,7 +707,10 @@ impl Akroatis {
                     return;
                 }
 
-                ui.label(format!("📋 LIVE RESULTS ({} endpoints)", self.results.len()));
+                ui.label(format!(
+                    "📋 LIVE RESULTS ({} endpoints)",
+                    self.results.len()
+                ));
                 ui.add_space(5.0);
 
                 for result in &self.results {
@@ -776,10 +790,7 @@ impl Akroatis {
                                             .and_then(|s| s.version.as_ref())
                                             .is_some()
                                         {
-                                            ui.colored_label(
-                                                egui::Color32::GREEN,
-                                                "✓ version",
-                                            );
+                                            ui.colored_label(egui::Color32::GREEN, "✓ version");
                                         }
                                     },
                                 );
@@ -802,10 +813,7 @@ impl Akroatis {
                                             format!("{}", v.severity),
                                         );
                                         if v.has_exploit {
-                                            ui.colored_label(
-                                                egui::Color32::RED,
-                                                "[EXPLOIT]",
-                                            );
+                                            ui.colored_label(egui::Color32::RED, "[EXPLOIT]");
                                         }
                                     });
                                 }
@@ -859,8 +867,7 @@ impl Akroatis {
             .show(ui, |ui| {
                 let mut display_results: Vec<_> = self.results.iter().collect();
                 if self.filter_vulnerabilities {
-                    display_results
-                        .retain(|r| self.vulnerability_map.contains_key(&r.port));
+                    display_results.retain(|r| self.vulnerability_map.contains_key(&r.port));
                 }
 
                 egui::Grid::new("results_grid")
@@ -877,8 +884,7 @@ impl Akroatis {
 
                         for result in &display_results {
                             let svc = result.service.as_ref();
-                            let has_vulns =
-                                self.vulnerability_map.contains_key(&result.port);
+                            let has_vulns = self.vulnerability_map.contains_key(&result.port);
 
                             let row_color = if has_vulns {
                                 egui::Color32::from_rgba_premultiplied(50, 15, 15, 200)
@@ -889,47 +895,28 @@ impl Akroatis {
                             egui::Frame::NONE
                                 .fill(row_color)
                                 .show(ui, |ui: &mut egui::Ui| {
-                                    ui.label(
-                                        egui::RichText::new(result.port.to_string())
-                                            .strong(),
-                                    );
-                                    ui.label(
-                                        svc.map(|s| s.name.as_str()).unwrap_or("-"),
-                                    );
-                                    ui.label(
-                                        svc.and_then(|s| s.version.as_deref())
-                                            .unwrap_or("-"),
-                                    );
-                                    ui.label(
-                                        svc.and_then(|s| s.product.as_deref())
-                                            .unwrap_or("-"),
-                                    );
+                                    ui.label(egui::RichText::new(result.port.to_string()).strong());
+                                    ui.label(svc.map(|s| s.name.as_str()).unwrap_or("-"));
+                                    ui.label(svc.and_then(|s| s.version.as_deref()).unwrap_or("-"));
+                                    ui.label(svc.and_then(|s| s.product.as_deref()).unwrap_or("-"));
 
-                                    if let Some(vulns) =
-                                        self.vulnerability_map.get(&result.port)
-                                    {
+                                    if let Some(vulns) = self.vulnerability_map.get(&result.port) {
                                         let threshold = &self.severity_threshold;
                                         let filtered: Vec<_> = vulns
                                             .iter()
-                                            .filter(|v| {
-                                                meets_threshold(&v.severity, threshold)
-                                            })
+                                            .filter(|v| meets_threshold(&v.severity, threshold))
                                             .collect();
                                         let mut v_text = String::new();
                                         for v in &filtered {
-                                            v_text.push_str(&format!(
-                                                "{} ({}), ",
-                                                v.id, v.severity
-                                            ));
+                                            v_text
+                                                .push_str(&format!("{} ({}), ", v.id, v.severity));
                                         }
                                         ui.label(v_text.trim_end_matches(", "));
                                     } else {
                                         ui.label("-");
                                     }
 
-                                    if let Some(vulns) =
-                                        self.vulnerability_map.get(&result.port)
-                                    {
+                                    if let Some(vulns) = self.vulnerability_map.get(&result.port) {
                                         let exploit_count =
                                             vulns.iter().filter(|v| v.has_exploit).count();
                                         let txt = if exploit_count > 0 {
@@ -996,25 +983,16 @@ impl Akroatis {
                     egui::Frame::NONE
                         .fill(egui::Color32::from_rgba_premultiplied(20, 10, 10, 200))
                         .corner_radius(egui::CornerRadius::same(4))
-                        .stroke(egui::Stroke::new(
-                            1.0_f32,
-                            sev_color.gamma_multiply(0.4),
-                        ))
+                        .stroke(egui::Stroke::new(1.0_f32, sev_color.gamma_multiply(0.4)))
                         .show(ui, |ui: &mut egui::Ui| {
                             ui.horizontal(|ui: &mut egui::Ui| {
-                                ui.colored_label(
-                                    sev_color,
-                                    format!("[{}]", v.severity),
-                                );
+                                ui.colored_label(sev_color, format!("[{}]", v.severity));
                                 if ui.link(&v.id).clicked() {
                                     self.selected_vulnerability = Some((*v).clone());
                                 }
                                 ui.label(format!("on port {}", port));
                                 if v.has_exploit {
-                                    ui.colored_label(
-                                        egui::Color32::RED,
-                                        "[EXPLOIT]",
-                                    );
+                                    ui.colored_label(egui::Color32::RED, "[EXPLOIT]");
                                 }
                                 if let Some(url) = &v.exploit_url {
                                     if ui.button("Open Exploit").clicked() {
@@ -1043,7 +1021,11 @@ impl Akroatis {
         let port_str = if ports.len() == 1 {
             ports[0].to_string()
         } else if ports.len() <= 10 {
-            ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",")
+            ports
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         } else {
             format!("{}-{}", ports[0], ports[ports.len() - 1])
         };
@@ -1090,62 +1072,53 @@ impl Akroatis {
 
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                    match e.name().as_ref() {
-                        b"port" => {
-                            in_port = true;
-                            port = 0;
-                            port_open = false;
-                            svc_name.clear();
-                            svc_product.clear();
-                            svc_version.clear();
-                            for attr in e.attributes().flatten() {
-                                if attr.key.as_ref() == b"portid" {
-                                    port = std::str::from_utf8(&attr.value)
-                                        .unwrap_or("0")
-                                        .parse()
-                                        .unwrap_or(0);
-                                }
+                Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"port" => {
+                        in_port = true;
+                        port = 0;
+                        port_open = false;
+                        svc_name.clear();
+                        svc_product.clear();
+                        svc_version.clear();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"portid" {
+                                port = std::str::from_utf8(&attr.value)
+                                    .unwrap_or("0")
+                                    .parse()
+                                    .unwrap_or(0);
                             }
                         }
-                        b"state" => {
-                            for attr in e.attributes().flatten() {
-                                if attr.key.as_ref() == b"state" {
-                                    port_open = attr.value.as_ref() == b"open";
-                                }
-                            }
-                        }
-                        b"service" => {
-                            for attr in e.attributes().flatten() {
-                                match attr.key.as_ref() {
-                                    b"name" => {
-                                        svc_name = std::str::from_utf8(&attr.value)
-                                            .unwrap_or("")
-                                            .to_string();
-                                    }
-                                    b"product" => {
-                                        svc_product = std::str::from_utf8(&attr.value)
-                                            .unwrap_or("")
-                                            .to_string();
-                                    }
-                                    b"version" => {
-                                        svc_version = std::str::from_utf8(&attr.value)
-                                            .unwrap_or("")
-                                            .to_string();
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    b"state" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                port_open = attr.value.as_ref() == b"open";
+                            }
+                        }
+                    }
+                    b"service" => {
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" => {
+                                    svc_name =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                b"product" => {
+                                    svc_product =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                b"version" => {
+                                    svc_version =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 Ok(Event::End(ref e)) => {
-                    if e.name().as_ref() == b"port"
-                        && in_port
-                        && port_open
-                        && port > 0
-                    {
+                    if e.name().as_ref() == b"port" && in_port && port_open && port > 0 {
                         let service = if svc_name.is_empty() && svc_version.is_empty() {
                             None
                         } else {
@@ -1265,15 +1238,19 @@ impl Akroatis {
             if self.filter_vulnerabilities && !has_vulns {
                 continue;
             }
-            let svc = r.service.as_ref().map(|s| s.name.as_str()).unwrap_or("Unknown");
+            let svc = r
+                .service
+                .as_ref()
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
             content.push_str(&format!("Port {}: open ({})\n", r.port, svc));
             if let Some(vulns) = self.vulnerability_map.get(&r.port) {
                 let threshold = &self.severity_threshold;
-                for v in vulns.iter().filter(|v| meets_threshold(&v.severity, threshold)) {
-                    content.push_str(&format!(
-                        "  [!] CVE: {} | Severity: {}\n",
-                        v.id, v.severity
-                    ));
+                for v in vulns
+                    .iter()
+                    .filter(|v| meets_threshold(&v.severity, threshold))
+                {
+                    content.push_str(&format!("  [!] CVE: {} | Severity: {}\n", v.id, v.severity));
                     content.push_str(&format!(
                         "      Description: {}\n",
                         v.description.replace('\n', " ")
@@ -1359,7 +1336,10 @@ impl Akroatis {
             let mut v_str = "<td>".to_string();
             if let Some(vulns) = self.vulnerability_map.get(&r.port) {
                 let threshold = &self.severity_threshold;
-                for v in vulns.iter().filter(|v| meets_threshold(&v.severity, threshold)) {
+                for v in vulns
+                    .iter()
+                    .filter(|v| meets_threshold(&v.severity, threshold))
+                {
                     v_str.push_str(&format!(
                         r#"<div class="cve-box"><span class="severity {}">{}</span> <strong>{}</strong><br>{}</div>"#,
                         v.severity.to_uppercase(),
@@ -1418,27 +1398,26 @@ impl Akroatis {
         //    of `Op` enum variants — similar to a PDF content-stream but
         //    expressed in Rust.  There is no layer/canvas object any more.
         // ------------------------------------------------------------------
-        let add_text_line =
-            |ops: &mut Vec<Op>,
-             text: &str,
-             size: f32,
-             x_mm: f32,
-             y_mm: f32,
-             font: &PdfFontHandle| {
-                ops.push(Op::SetFont {
-                    font: font.clone(),
-                    size: Pt(size),
-                });
-                ops.push(Op::SetTextCursor {
-                    pos: printpdf::Point {
-                        x: Mm(x_mm).into(),
-                        y: Mm(y_mm).into(),
-                    },
-                });
-                ops.push(Op::ShowText {
-                    items: vec![TextItem::Text(text.to_string())],
-                });
-            };
+        let add_text_line = |ops: &mut Vec<Op>,
+                             text: &str,
+                             size: f32,
+                             x_mm: f32,
+                             y_mm: f32,
+                             font: &PdfFontHandle| {
+            ops.push(Op::SetFont {
+                font: font.clone(),
+                size: Pt(size),
+            });
+            ops.push(Op::SetTextCursor {
+                pos: printpdf::Point {
+                    x: Mm(x_mm).into(),
+                    y: Mm(y_mm).into(),
+                },
+            });
+            ops.push(Op::ShowText {
+                items: vec![TextItem::Text(text.to_string())],
+            });
+        };
 
         // ------------------------------------------------------------------
         // 4. Build page ops
@@ -1447,7 +1426,14 @@ impl Akroatis {
         ops.push(Op::StartTextSection);
 
         // Title / header
-        add_text_line(&mut ops, "AKROATIS SCAN REPORT", 16.0, 20.0, 277.0, &font_bold);
+        add_text_line(
+            &mut ops,
+            "AKROATIS SCAN REPORT",
+            16.0,
+            20.0,
+            277.0,
+            &font_bold,
+        );
         add_text_line(
             &mut ops,
             &format!("Target : {}", self.ip_input),

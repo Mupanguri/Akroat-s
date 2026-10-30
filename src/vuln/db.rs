@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -36,13 +36,18 @@ impl VulnDb {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|e| VulnError::DbOpen(e.to_string()))?;
 
-        let db = Self { conn: Mutex::new(conn) };
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
         db.initialize()?;
         Ok(db)
     }
 
     fn initialize(&self) -> Result<(), VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS exploits (
@@ -105,7 +110,10 @@ impl VulnDb {
 
     /// Import a single exploit record from files.csv
     pub fn import_exploit(&self, record: &ExploitRecord) -> Result<(), VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
         let cve_ids_json = serde_json::to_string(&record.cve_ids)?;
 
         conn.execute(
@@ -134,7 +142,10 @@ impl VulnDb {
 
     /// Import a CVE/vulnerability record
     pub fn import_cve(&self, record: &VulnRecord) -> Result<(), VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
 
         let product = record
             .affected_cpe
@@ -204,7 +215,10 @@ impl VulnDb {
 
     /// Store in NVD cache
     pub fn cache_set(&self, key: &str, value: &str) -> Result<(), VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
         let now = chrono::Utc::now().timestamp();
 
         let count: i64 = conn
@@ -229,8 +243,15 @@ impl VulnDb {
     }
 
     /// Search exploits using FTS5
-    pub fn search_exploits(&self, query: &str, limit: usize) -> Result<Vec<ExploitRecord>, VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+    pub fn search_exploits(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ExploitRecord>, VulnError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
 
         let fts_query: String = query
             .split_whitespace()
@@ -252,8 +273,7 @@ impl VulnDb {
         let results = stmt
             .query_map(params![fts_query, limit as i64], |row| {
                 let cve_ids_json: String = row.get(8)?;
-                let cve_ids: Vec<String> =
-                    serde_json::from_str(&cve_ids_json).unwrap_or_default();
+                let cve_ids: Vec<String> = serde_json::from_str(&cve_ids_json).unwrap_or_default();
 
                 Ok(ExploitRecord {
                     edb_id: row.get(0)?,
@@ -276,21 +296,30 @@ impl VulnDb {
 
     /// Get exploit count
     pub fn exploit_count(&self) -> Result<i64, VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
         conn.query_row("SELECT COUNT(*) FROM exploits", [], |row| row.get(0))
             .map_err(|e| VulnError::DbQuery(e.to_string()))
     }
 
     /// Get CVE count
     pub fn cve_count(&self) -> Result<i64, VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
         conn.query_row("SELECT COUNT(*) FROM cve_index", [], |row| row.get(0))
             .map_err(|e| VulnError::DbQuery(e.to_string()))
     }
 
     /// Search exploits by CVE ID (looks in the cve_ids JSON array)
     pub fn search_by_cve(&self, cve_id: &str) -> Result<Vec<ExploitRecord>, VulnError> {
-        let conn = self.conn.lock().map_err(|e| VulnError::DbExecute(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| VulnError::DbExecute(e.to_string()))?;
         let pattern = format!("%{}%", cve_id);
         let mut stmt = conn
             .prepare(
@@ -302,8 +331,7 @@ impl VulnDb {
         let results = stmt
             .query_map(params![pattern], |row| {
                 let cve_ids_json: String = row.get(8)?;
-                let cve_ids: Vec<String> =
-                    serde_json::from_str(&cve_ids_json).unwrap_or_default();
+                let cve_ids: Vec<String> = serde_json::from_str(&cve_ids_json).unwrap_or_default();
                 Ok(ExploitRecord {
                     edb_id: row.get(0)?,
                     title: row.get(1)?,

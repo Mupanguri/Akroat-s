@@ -1,20 +1,20 @@
 pub mod config;
 pub mod services;
-pub mod vuln;
 pub mod utils;
+pub mod vuln;
 
 use futures::StreamExt;
+use governor::{Quota, RateLimiter};
 use ipnetwork::IpNetwork;
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
-use std::sync::mpsc::Sender;
-use governor::{Quota, RateLimiter};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::{TcpStream, UdpSocket};
-use serde::{Deserialize, Serialize};
 
 /// Configuration for port scanning
 #[derive(Clone)]
@@ -45,7 +45,11 @@ pub enum ScanError {
 impl std::fmt::Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScanError::PermissionDenied(msg) => write!(f, "Permission denied: {}. Root/Admin privileges required for SYN scan.", msg),
+            ScanError::PermissionDenied(msg) => write!(
+                f,
+                "Permission denied: {}. Root/Admin privileges required for SYN scan.",
+                msg
+            ),
             ScanError::SocketError(msg) => write!(f, "Socket error: {}", msg),
             ScanError::InterfaceNotFound(msg) => write!(f, "Interface error: {}", msg),
             ScanError::InternalError(msg) => write!(f, "Internal error: {}", msg),
@@ -88,7 +92,14 @@ pub struct PortResult {
 }
 
 impl PortResult {
-    pub fn new(port: u16, is_open: bool, service: Option<ServiceInfo>, os_guess: Option<String>, window: Option<u16>, options: Vec<String>) -> Self {
+    pub fn new(
+        port: u16,
+        is_open: bool,
+        service: Option<ServiceInfo>,
+        os_guess: Option<String>,
+        window: Option<u16>,
+        options: Vec<String>,
+    ) -> Self {
         Self {
             port,
             is_open,
@@ -114,17 +125,9 @@ fn dns_probe() -> Vec<u8> {
 
 fn snmp_probe() -> Vec<u8> {
     vec![
-        0x30, 0x26,
-        0x02, 0x01, 0x01,
-        0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
-        0xa0, 0x19,
-        0x02, 0x02, 0x02, 0x37,
-        0x02, 0x01, 0x00,
-        0x02, 0x01, 0x00,
-        0x30, 0x0f,
-        0x30, 0x0d,
-        0x06, 0x09, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00,
-        0x05, 0x00,
+        0x30, 0x26, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0xa0, 0x19,
+        0x02, 0x02, 0x02, 0x37, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0f, 0x30, 0x0d, 0x06,
+        0x09, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00,
     ]
 }
 
@@ -161,14 +164,20 @@ impl PortSeq {
         Self { count, iter }
     }
 
-    pub fn len(&self) -> usize { self.count }
-    pub fn is_empty(&self) -> bool { self.count == 0 }
+    pub fn len(&self) -> usize {
+        self.count
+    }
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
 }
 
 impl IntoIterator for PortSeq {
     type Item = u16;
     type IntoIter = Box<dyn Iterator<Item = u16> + Send>;
-    fn into_iter(self) -> Self::IntoIter { self.iter }
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter
+    }
 }
 
 /// Lazy port iterator — avoids pre-allocating Vec for full-range scans.
@@ -260,7 +269,12 @@ macro_rules! scan_stream {
         if ports.is_empty() {
             Vec::new()
         } else {
-            tracing::info!("Starting {} scan on {} ({} ports)", $label, $ip, ports.len());
+            tracing::info!(
+                "Starting {} scan on {} ({} ports)",
+                $label,
+                $ip,
+                ports.len()
+            );
             let results: Vec<PortResult> = futures::stream::iter(ports.into_iter())
                 .map(|port| {
                     let config = $config.clone();
@@ -291,7 +305,12 @@ macro_rules! scan_stream {
 
 /// Pure TCP connect + UDP port scanning with optional service detection
 pub async fn scan_ports(config: ScanConfig) -> Result<Vec<PortResult>, ScanError> {
-    let is_cancelled = || config.cancel_signal.as_ref().is_some_and(|s| s.load(Ordering::SeqCst));
+    let is_cancelled = || {
+        config
+            .cancel_signal
+            .as_ref()
+            .is_some_and(|s| s.load(Ordering::SeqCst))
+    };
 
     let pps = if config.delay > 0 {
         (1000 / config.delay.max(1)).max(1)
@@ -327,7 +346,9 @@ pub async fn scan_ports(config: ScanConfig) -> Result<Vec<PortResult>, ScanError
 
     let mut all_results = Vec::new();
     for ip in targets {
-        if is_cancelled() { break; }
+        if is_cancelled() {
+            break;
+        }
 
         all_results.extend(scan_stream!(
             port_list(&config),
@@ -336,7 +357,13 @@ pub async fn scan_ports(config: ScanConfig) -> Result<Vec<PortResult>, ScanError
             ip,
             "TCP",
             |ip: IpAddr, port: u16, cfg: &ScanConfig| {
-                Box::pin(scan_single_port(ip, port, cfg.timeout, cfg.enable_service_detection, cfg.deep_inspection))
+                Box::pin(scan_single_port(
+                    ip,
+                    port,
+                    cfg.timeout,
+                    cfg.enable_service_detection,
+                    cfg.deep_inspection,
+                ))
             }
         ));
 
@@ -352,7 +379,12 @@ pub async fn scan_ports(config: ScanConfig) -> Result<Vec<PortResult>, ScanError
             ip,
             "UDP",
             |ip: IpAddr, port: u16, cfg: &ScanConfig| {
-                Box::pin(scan_udp_port(ip, port, cfg.timeout, cfg.enable_service_detection))
+                Box::pin(scan_udp_port(
+                    ip,
+                    port,
+                    cfg.timeout,
+                    cfg.enable_service_detection,
+                ))
             }
         ));
 
@@ -407,7 +439,13 @@ async fn scan_udp_port(ip: IpAddr, port: u16, timeout_ms: u64, detect: bool) -> 
     }
 }
 
-async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64, detect: bool, deep: bool) -> PortResult {
+async fn scan_single_port(
+    ip: IpAddr,
+    port: u16,
+    timeout_ms: u64,
+    detect: bool,
+    deep: bool,
+) -> PortResult {
     let addr = SocketAddr::new(ip, port);
     let timeout = Duration::from_millis(timeout_ms);
 
@@ -430,7 +468,11 @@ async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64, detect: bool, 
             if let Some(ref si) = service {
                 if let (Some(product), Some(version)) = (&si.product, &si.version) {
                     if let Some(engine) = crate::vuln::exploit::get_engine() {
-                        for v in engine.match_service(product, version, &crate::vuln::engine::Severity::None) {
+                        for v in engine.match_service(
+                            product,
+                            version,
+                            &crate::vuln::engine::Severity::None,
+                        ) {
                             vulns.push(VulnerabilityInfo {
                                 cve_id: v.id.clone(),
                                 severity: format!("{:?}", v.severity),
@@ -445,7 +487,8 @@ async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64, detect: bool, 
 
             if deep && services::tls::is_tls_port(port) {
                 let ip_str = ip.to_string();
-                if let Some(tls_info) = services::tls::analyze_tls(&ip_str, port, timeout_ms).await {
+                if let Some(tls_info) = services::tls::analyze_tls(&ip_str, port, timeout_ms).await
+                {
                     let tls_str = services::tls::format_tls_info(&tls_info);
                     if let Some(ref mut si) = service {
                         let existing = si.extrainfo.take().unwrap_or_default();
@@ -461,16 +504,24 @@ async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64, detect: bool, 
             let ip_str = ip.to_string();
             let os_fp = tokio::task::spawn_blocking(move || {
                 utils::os_fingerprint::fingerprint_os(&ip_str, port, timeout_ms)
-            }).await.ok().flatten();
+            })
+            .await
+            .ok()
+            .flatten();
 
             let (os_guess, tcp_window, tcp_options) = if let Some(fp) = os_fp {
-                (Some(fp.guess), Some(fp.window_size), vec![format!("TTL={}", fp.ttl)])
+                (
+                    Some(fp.guess),
+                    Some(fp.window_size),
+                    vec![format!("TTL={}", fp.ttl)],
+                )
             } else {
                 let _ = stream.local_addr();
                 (None, None, vec![])
             };
 
-            let mut result = PortResult::new(port, true, service, os_guess, tcp_window, tcp_options);
+            let mut result =
+                PortResult::new(port, true, service, os_guess, tcp_window, tcp_options);
             result.vulnerabilities = vulns;
             result
         }

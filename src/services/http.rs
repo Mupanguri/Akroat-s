@@ -1,8 +1,8 @@
 use crate::services::banner_grabber::grab_banner;
 use crate::ServiceInfo;
 use regex::Regex;
-use reqwest::Client;
 use reqwest::header::HeaderMap;
+use reqwest::Client;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -148,9 +148,8 @@ fn extract_server_header(response: &str) -> Option<String> {
 
 fn extract_html_title(response: &str) -> Option<String> {
     static TITLE_RE: OnceLock<Regex> = OnceLock::new();
-    let re = TITLE_RE.get_or_init(|| {
-        Regex::new(r"(?i)<title[^>]*>(.*?)</title>").expect("Invalid title regex")
-    });
+    let re = TITLE_RE
+        .get_or_init(|| Regex::new(r"(?i)<title[^>]*>(.*?)</title>").expect("Invalid title regex"));
     re.captures(response)
         .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
 }
@@ -206,10 +205,7 @@ pub fn detect_app_stack(headers: &HeaderMap, body: &str, _cookies: &str) -> Vec<
         }
     }
 
-    if let Some(powered) = headers
-        .get("x-powered-by")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(powered) = headers.get("x-powered-by").and_then(|v| v.to_str().ok()) {
         let p = powered.to_lowercase();
         if p.contains("php") {
             let ver = extract_version(powered, "php/");
@@ -240,10 +236,7 @@ pub fn detect_app_stack(headers: &HeaderMap, body: &str, _cookies: &str) -> Vec<
         }
     }
 
-    if let Some(gen) = headers
-        .get("x-generator")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(gen) = headers.get("x-generator").and_then(|v| v.to_str().ok()) {
         let g = gen.to_lowercase();
         if g.contains("wordpress") || g.contains("wordpress") {
             let ver = extract_version(gen, "wordpress ");
@@ -305,19 +298,15 @@ pub fn detect_app_stack(headers: &HeaderMap, body: &str, _cookies: &str) -> Vec<
 
     static META_GEN_RE: OnceLock<Regex> = OnceLock::new();
     let re = META_GEN_RE.get_or_init(|| {
-        Regex::new(
-            r#"(?i)<meta[^>]+(?:name=["']generator["']|content=["']([^"']+)["'])[^>]*>"#,
-        )
-        .expect("Invalid meta regex")
+        Regex::new(r#"(?i)<meta[^>]+(?:name=["']generator["']|content=["']([^"']+)["'])[^>]*>"#)
+            .expect("Invalid meta regex")
     });
     if let Some(caps) = re.captures(body) {
         if let Some(content) = caps.get(1).or_else(|| {
             static ALT_GEN: OnceLock<Regex> = OnceLock::new();
             let r2 = ALT_GEN.get_or_init(|| {
-                Regex::new(
-                    r#"(?i)content=["']([^"']+)["'][^>]*name=["']generator["']"#,
-                )
-                .expect("Invalid meta regex")
+                Regex::new(r#"(?i)content=["']([^"']+)["'][^>]*name=["']generator["']"#)
+                    .expect("Invalid meta regex")
             });
             r2.captures(body).and_then(|c| c.get(1))
         }) {
@@ -425,8 +414,7 @@ pub fn detect_app_stack(headers: &HeaderMap, body: &str, _cookies: &str) -> Vec<
             certainty: 0.8,
         });
     }
-    if (headers.get("x-drupal-cache").is_some()
-        || headers.get("x-drupal-dynamic-cache").is_some())
+    if (headers.get("x-drupal-cache").is_some() || headers.get("x-drupal-dynamic-cache").is_some())
         && !techs.iter().any(|t| t.name == "Drupal")
     {
         techs.push(AppTech {

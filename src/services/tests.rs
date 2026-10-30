@@ -1,5 +1,5 @@
-use crate::services::ssh::extract_ssh_version;
 use crate::services::ftp::extract_ftp_version;
+use crate::services::ssh::extract_ssh_version;
 
 #[test]
 fn test_extract_ssh_version() {

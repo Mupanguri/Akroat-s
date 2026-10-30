@@ -1,9 +1,9 @@
+use rustls::pki_types::ServerName;
+use rustls::ClientConfig;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
-use rustls::pki_types::ServerName;
-use rustls::ClientConfig;
 use x509_parser::prelude::{parse_x509_certificate, GeneralName};
 
 const TLS_PORTS: &[u16] = &[443, 993, 995, 8443, 9443];
@@ -42,7 +42,9 @@ pub async fn analyze_tls(ip: &str, port: u16, timeout_ms: u64) -> Option<TlsInfo
     let ip_addr: std::net::IpAddr = ip.parse().ok()?;
     let dns_name = ServerName::IpAddress(ip_addr.into());
 
-    let connection = tokio::time::timeout(timeout, connector.connect(dns_name, stream)).await.ok()?;
+    let connection = tokio::time::timeout(timeout, connector.connect(dns_name, stream))
+        .await
+        .ok()?;
     let connection = connection.ok()?;
 
     let (_, session) = connection.get_ref();
@@ -62,7 +64,9 @@ pub async fn analyze_tls(ip: &str, port: u16, timeout_ms: u64) -> Option<TlsInfo
 
             let mut sans = Vec::new();
             for ext in cert.extensions() {
-                if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) = ext.parsed_extension() {
+                if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) =
+                    ext.parsed_extension()
+                {
                     for name in &san.general_names {
                         match name {
                             GeneralName::DNSName(d) => sans.push(d.to_string()),
@@ -70,9 +74,10 @@ pub async fn analyze_tls(ip: &str, port: u16, timeout_ms: u64) -> Option<TlsInfo
                                 if ip.len() == 4 {
                                     sans.push(format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]));
                                 } else if ip.len() == 16 {
-                                    sans.push(format!("{:02x}{:02x}:{:02x}{:02x}:...:{:02x}{:02x}:{:02x}{:02x}",
-                                        ip[0], ip[1], ip[2], ip[3],
-                                        ip[12], ip[13], ip[14], ip[15]));
+                                    sans.push(format!(
+                                        "{:02x}{:02x}:{:02x}{:02x}:...:{:02x}{:02x}:{:02x}{:02x}",
+                                        ip[0], ip[1], ip[2], ip[3], ip[12], ip[13], ip[14], ip[15]
+                                    ));
                                 }
                             }
                             _ => {}
@@ -81,7 +86,14 @@ pub async fn analyze_tls(ip: &str, port: u16, timeout_ms: u64) -> Option<TlsInfo
                 }
             }
 
-            Some(TlsInfo { subject, issuer, not_before, not_after, sans, tls_version })
+            Some(TlsInfo {
+                subject,
+                issuer,
+                not_before,
+                not_after,
+                sans,
+                tls_version,
+            })
         }
         Err(_) => None,
     }
